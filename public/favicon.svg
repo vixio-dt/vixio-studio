@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="vx" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#29abe2"/>
+      <stop offset="0.55" stop-color="#7dd6f6"/>
+      <stop offset="1" stop-color="#f7f4d8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0b0d10"/>
+  <!-- The "v" triangle from the vixio wordmark -->
+  <path d="M14 20h36L32 50Z" fill="url(#vx)"/>
+</svg>
