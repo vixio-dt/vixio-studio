@@ -1,0 +1,25 @@
+# Vixio Studio web app behind the VPS's existing Traefik, served at
+# studio.vixio.app. Pulls the GHCR image built by .github/workflows/image.yml.
+# Deployed through the Hostinger API (VPS_createNewProjectV1), project name
+# "vixio-studio", so the compose network resolves to vixio-studio_web.
+services:
+  app:
+    image: ghcr.io/vixio-dt/vixio-studio:latest
+    container_name: vixio-studio-web
+    restart: unless-stopped
+    networks:
+      - web
+    mem_limit: 128m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=vixio-studio_web
+      - traefik.http.routers.vixio-studio.rule=Host(`studio.vixio.app`)
+      - traefik.http.routers.vixio-studio.entrypoints=websecure
+      - traefik.http.routers.vixio-studio.tls.certresolver=letsencrypt
+      - traefik.http.services.vixio-studio.loadbalancer.server.port=80
+
+networks:
+  web:
