@@ -10,6 +10,18 @@ import { persist } from "zustand/middleware";
 
 export type ProviderChoice = "vixio-preview" | "gemini" | "fal";
 
+/**
+ * The Vixio Creatives Google OAuth client id ships as the default so the
+ * deployed app is sign-in-ready for the whole team without per-device setup.
+ * An OAuth client id is public by design — the security boundary is the
+ * authorized JavaScript origins configured in Google Cloud, not secrecy of the
+ * id — so embedding it is safe. Override at build time with
+ * VITE_GOOGLE_CLIENT_ID, or per-browser in Settings.
+ */
+const DEFAULT_GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ??
+  "157133855208-4lf5c8tqrq8tbi8bgoa8iujv40oacjhv.apps.googleusercontent.com";
+
 type SettingsState = {
   geminiApiKey: string;
   falApiKey: string;
@@ -42,7 +54,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       geminiApiKey: "",
       falApiKey: "",
-      googleClientId: "",
+      googleClientId: DEFAULT_GOOGLE_CLIENT_ID,
       textProvider: "vixio-preview",
       imageProvider: "vixio-preview",
       videoProvider: "vixio-preview",
@@ -65,6 +77,19 @@ export const useSettingsStore = create<SettingsState>()(
       setFalImageModel: (falImageModel) => set({ falImageModel }),
       setFalVideoModel: (falVideoModel) => set({ falVideoModel }),
     }),
-    { name: "vixio-settings" },
+    {
+      name: "vixio-settings",
+      // A browser that persisted settings before the client id shipped would
+      // hold an empty string; don't let that mask the shipped default. Keep an
+      // explicitly-set custom id, otherwise fall back to the current default.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<SettingsState>;
+        const googleClientId =
+          saved.googleClientId && saved.googleClientId.length > 0
+            ? saved.googleClientId
+            : current.googleClientId;
+        return { ...current, ...saved, googleClientId };
+      },
+    },
   ),
 );
