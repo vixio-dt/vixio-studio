@@ -1,0 +1,82 @@
+{
+  "//": "Vixio Studio asset-drive schema for PocketBase. Import via Admin UI (Settings > Import collections) or apply with a migration. Mirrors the app's domain types so the browser stores sync field-for-field. Every collection is workspace-scoped; access rules enforce team membership.",
+  "collections": [
+    {
+      "name": "workspaces",
+      "type": "base",
+      "schema": [
+        { "name": "name", "type": "text", "required": true },
+        { "name": "owner", "type": "relation", "required": true, "options": { "collectionId": "_pb_users_auth_", "maxSelect": 1 } }
+      ],
+      "listRule": "@request.auth.id != \"\" && members_via_workspace.user ?= @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && members_via_workspace.user ?= @request.auth.id",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "owner = @request.auth.id",
+      "deleteRule": "owner = @request.auth.id"
+    },
+    {
+      "name": "members",
+      "type": "base",
+      "schema": [
+        { "name": "workspace", "type": "relation", "required": true, "options": { "maxSelect": 1, "cascadeDelete": true } },
+        { "name": "user", "type": "relation", "required": true, "options": { "collectionId": "_pb_users_auth_", "maxSelect": 1, "cascadeDelete": true } },
+        { "name": "role", "type": "select", "required": true, "options": { "values": ["owner", "editor", "viewer"] } }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_member ON members (workspace, user)"],
+      "listRule": "@request.auth.id != \"\" && workspace.members_via_workspace.user ?= @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && workspace.members_via_workspace.user ?= @request.auth.id",
+      "createRule": "@request.auth.id != \"\" && workspace.owner = @request.auth.id",
+      "updateRule": "workspace.owner = @request.auth.id",
+      "deleteRule": "workspace.owner = @request.auth.id"
+    },
+    {
+      "name": "projects",
+      "type": "base",
+      "schema": [
+        { "name": "workspace", "type": "relation", "required": true, "options": { "maxSelect": 1, "cascadeDelete": true } },
+        { "name": "clientId", "type": "text", "required": true, "options": { "min": 1 } },
+        { "name": "title", "type": "text", "required": true },
+        { "name": "logline", "type": "text" },
+        { "name": "synopsis", "type": "text" },
+        { "name": "format", "type": "text" },
+        { "name": "genre", "type": "text" },
+        { "name": "styleId", "type": "text" },
+        { "name": "aspectRatio", "type": "text" },
+        { "name": "coverAssetId", "type": "text" },
+        { "name": "graph", "type": "json", "options": { "maxSize": 5000000 } },
+        { "name": "updatedBy", "type": "relation", "options": { "collectionId": "_pb_users_auth_", "maxSelect": 1 } }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_project_client ON projects (workspace, clientId)"],
+      "listRule": "workspace.members_via_workspace.user ?= @request.auth.id",
+      "viewRule": "workspace.members_via_workspace.user ?= @request.auth.id",
+      "createRule": "workspace.members_via_workspace.user ?= @request.auth.id && workspace.members_via_workspace.role ?~ \"owner|editor\"",
+      "updateRule": "workspace.members_via_workspace.user ?= @request.auth.id && workspace.members_via_workspace.role ?~ \"owner|editor\"",
+      "deleteRule": "workspace.members_via_workspace.user ?= @request.auth.id && workspace.members_via_workspace.role ?~ \"owner|editor\""
+    },
+    {
+      "name": "assets",
+      "type": "base",
+      "schema": [
+        { "name": "workspace", "type": "relation", "required": true, "options": { "maxSelect": 1, "cascadeDelete": true } },
+        { "name": "project", "type": "relation", "options": { "maxSelect": 1, "cascadeDelete": true } },
+        { "name": "clientId", "type": "text", "required": true },
+        { "name": "kind", "type": "select", "required": true, "options": { "values": ["image", "video", "audio"] } },
+        { "name": "file", "type": "file", "required": true, "options": { "maxSelect": 1, "maxSize": 104857600, "mimeTypes": ["image/png", "image/jpeg", "image/webp", "video/webm", "video/mp4", "audio/mpeg", "audio/wav", "audio/webm"] } },
+        { "name": "thumb", "type": "file", "options": { "maxSelect": 1, "maxSize": 524288, "mimeTypes": ["image/webp", "image/jpeg"] } },
+        { "name": "width", "type": "number" },
+        { "name": "height", "type": "number" },
+        { "name": "duration", "type": "number" },
+        { "name": "prompt", "type": "text" },
+        { "name": "model", "type": "text" },
+        { "name": "seed", "type": "number" },
+        { "name": "createdBy", "type": "relation", "options": { "collectionId": "_pb_users_auth_", "maxSelect": 1 } }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_asset_client ON assets (workspace, clientId)"],
+      "listRule": "workspace.members_via_workspace.user ?= @request.auth.id",
+      "viewRule": "workspace.members_via_workspace.user ?= @request.auth.id",
+      "createRule": "workspace.members_via_workspace.user ?= @request.auth.id && workspace.members_via_workspace.role ?~ \"owner|editor\"",
+      "updateRule": "workspace.members_via_workspace.user ?= @request.auth.id && workspace.members_via_workspace.role ?~ \"owner|editor\"",
+      "deleteRule": "createdBy = @request.auth.id || workspace.owner = @request.auth.id"
+    }
+  ]
+}

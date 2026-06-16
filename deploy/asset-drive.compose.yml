@@ -1,0 +1,55 @@
+# Vixio Studio asset drive: PocketBase behind the VPS's existing Traefik.
+#
+# PocketBase is one small Go binary that gives us auth, a Postgres-free
+# SQLite database, file storage on disk, per-collection access rules, and
+# realtime subscriptions. It is the team-shared source of truth that the
+# browser app's local IndexedDB cache syncs against.
+#
+# Deployed through the Hostinger API (VPS_createNewProjectV1), not SSH:
+#   project_name: vixio-drive
+#   environment:  STUDIO_API_HOST=<the host you picked, e.g. drive.vixio.app>
+#
+# Traefik on this box runs network_mode: host with the docker provider and a
+# letsencrypt HTTP-challenge resolver, so a labelled container is discovered
+# and given TLS automatically. The traefik.docker.network label tells the
+# host-mode Traefik which bridge IP to dial.
+
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:0.22.21
+    container_name: vixio-drive
+    restart: unless-stopped
+    command:
+      - serve
+      - --http=0.0.0.0:8090
+    networks:
+      - web
+    volumes:
+      - vixio-drive-data:/pb_data
+      - vixio-drive-public:/pb_public
+    mem_limit: 512m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=vixio-drive_web
+      - traefik.http.routers.vixio-drive.rule=Host(`${STUDIO_API_HOST}`)
+      - traefik.http.routers.vixio-drive.entrypoints=websecure
+      - traefik.http.routers.vixio-drive.tls.certresolver=letsencrypt
+      - traefik.http.services.vixio-drive.loadbalancer.server.port=8090
+      # Generated frames and clips are large; lift the proxy body limit.
+      - traefik.http.middlewares.vixio-drive-body.buffering.maxRequestBodyBytes=104857600
+      - traefik.http.routers.vixio-drive.middlewares=vixio-drive-body
+
+networks:
+  web:
+
+volumes:
+  vixio-drive-data:
+  vixio-drive-public:
