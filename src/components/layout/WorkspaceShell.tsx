@@ -17,6 +17,7 @@ import type { ProjectId } from "@/lib/id";
 import { useProjectsStore } from "@/stores/projects";
 import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
 
+import { AccountChip } from "./AccountChip";
 import { TaskDrawer } from "./TaskDrawer";
 
 const NAV_ITEMS = [
@@ -80,6 +81,7 @@ export const WorkspaceShell = () => {
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <AccountChip />
           <button
             type="button"
             onClick={() => setQueueOpen((current) => !current)}

@@ -2,6 +2,7 @@ import { FilmSlate, GearSix, Plus } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { AccountChip } from "@/components/layout/AccountChip";
 import { Button, EmptyState } from "@/components/ui";
 import { useProjectsStore } from "@/stores/projects";
 
@@ -40,13 +41,16 @@ export const ProjectsPage = () => {
               {projectsCopy.topBar.appName}
             </span>
           </div>
-          <Link
-            to="/settings"
-            className="flex h-9 items-center gap-2 px-3 text-sm text-fg-secondary transition-colors duration-150 hover:bg-ink-hover hover:text-fg"
-          >
-            <GearSix size={18} aria-hidden />
-            {projectsCopy.topBar.settings}
-          </Link>
+          <div className="flex items-center gap-1">
+            <AccountChip />
+            <Link
+              to="/settings"
+              className="flex h-9 items-center gap-2 px-3 text-sm text-fg-secondary transition-colors duration-150 hover:bg-ink-hover hover:text-fg"
+            >
+              <GearSix size={18} aria-hidden />
+              {projectsCopy.topBar.settings}
+            </Link>
+          </div>
         </div>
       </header>
 

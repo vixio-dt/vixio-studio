@@ -1,8 +1,10 @@
-import { ArrowLeft, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, CloudCheck, Trash } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { signIn, signOut } from "@/cloud/sync";
 import { Button, Dialog, Field, Segmented, TextInput } from "@/components/ui";
+import { useSessionStore } from "@/stores/session";
 import type { ProviderChoice } from "@/stores/settings";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -44,6 +46,96 @@ const ProviderRow = ({ label, hint, value, onChange }: ProviderRowProps) => (
     />
   </div>
 );
+
+/**
+ * Google Drive sign-in and storage mode. When signed out the section reads
+ * exactly like a local-first app with an optional upgrade; signing in mirrors
+ * the workspace to the user's own Drive. All async seams return Result, so a
+ * failure lands as an inline session message, never a thrown error.
+ */
+const DriveSection = () => {
+  const googleClientId = useSettingsStore((state) => state.googleClientId);
+  const setGoogleClientId = useSettingsStore((state) => state.setGoogleClientId);
+  const sessionState = useSessionStore((state) => state.session);
+  const storageMode = useSessionStore((state) => state.storageMode);
+
+  const isSigningIn = sessionState.state === "signing-in";
+
+  const handleSignIn = () => {
+    void signIn();
+  };
+
+  return (
+    <section
+      aria-labelledby="settings-drive"
+      className="mt-6 border-t border-line pt-6"
+    >
+      <h2
+        id="settings-drive"
+        className="font-display text-lg font-bold tracking-[-0.02em]"
+      >
+        {settingsCopy.drive.heading}
+      </h2>
+      <p className="mt-1 text-[13px] text-fg-muted">{settingsCopy.drive.intro}</p>
+
+      <div className="mt-5 flex flex-col gap-5">
+        <Field
+          label={settingsCopy.drive.clientIdLabel}
+          helper={settingsCopy.drive.clientIdHelper}
+        >
+          {({ inputId, describedBy }) => (
+            <TextInput
+              id={inputId}
+              aria-describedby={describedBy}
+              type="password"
+              autoComplete="off"
+              placeholder={settingsCopy.drive.clientIdPlaceholder}
+              value={googleClientId}
+              onChange={(event) => setGoogleClientId(event.target.value)}
+            />
+          )}
+        </Field>
+
+        {/* Account row: stacks below 640px. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {sessionState.state === "signed-in" ? (
+            <span className="inline-flex items-center gap-2 text-[13px] text-fg-secondary">
+              <CloudCheck size={16} className="text-accent" aria-hidden />
+              {settingsCopy.drive.signedInAs(sessionState.identity.email)}
+            </span>
+          ) : sessionState.state === "error" ? (
+            <span role="alert" className="text-[13px] text-danger">
+              {sessionState.message}
+            </span>
+          ) : (
+            <span className="text-[13px] text-fg-muted">
+              {storageMode === "drive"
+                ? settingsCopy.drive.modeDriveNote
+                : settingsCopy.drive.modeLocalNote}
+            </span>
+          )}
+
+          {sessionState.state === "signed-in" ? (
+            <Button variant="outline" size="sm" onClick={() => signOut()}>
+              {settingsCopy.drive.signOut}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              busy={isSigningIn}
+              onClick={handleSignIn}
+            >
+              {isSigningIn
+                ? settingsCopy.drive.signingIn
+                : settingsCopy.drive.signIn}
+            </Button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
 
 export const SettingsPage = () => {
   const textProvider = useSettingsStore((state) => state.textProvider);
@@ -270,6 +362,8 @@ export const SettingsPage = () => {
             </Field>
           </div>
         </section>
+
+        <DriveSection />
 
         <section
           aria-labelledby="settings-workspace"

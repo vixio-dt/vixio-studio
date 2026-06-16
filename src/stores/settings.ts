@@ -13,6 +13,7 @@ export type ProviderChoice = "vixio-preview" | "gemini" | "fal";
 type SettingsState = {
   geminiApiKey: string;
   falApiKey: string;
+  googleClientId: string;
   textProvider: ProviderChoice;
   imageProvider: ProviderChoice;
   videoProvider: ProviderChoice;
@@ -24,6 +25,7 @@ type SettingsState = {
   falVideoModel: string;
   setGeminiApiKey: (key: string) => void;
   setFalApiKey: (key: string) => void;
+  setGoogleClientId: (clientId: string) => void;
   setTextProvider: (choice: ProviderChoice) => void;
   setImageProvider: (choice: ProviderChoice) => void;
   setVideoProvider: (choice: ProviderChoice) => void;
@@ -40,6 +42,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       geminiApiKey: "",
       falApiKey: "",
+      googleClientId: "",
       textProvider: "vixio-preview",
       imageProvider: "vixio-preview",
       videoProvider: "vixio-preview",
@@ -51,6 +54,7 @@ export const useSettingsStore = create<SettingsState>()(
       falVideoModel: "fal-ai/kling-video/v1.6/standard/image-to-video",
       setGeminiApiKey: (geminiApiKey) => set({ geminiApiKey }),
       setFalApiKey: (falApiKey) => set({ falApiKey }),
+      setGoogleClientId: (googleClientId) => set({ googleClientId }),
       setTextProvider: (textProvider) => set({ textProvider }),
       setImageProvider: (imageProvider) => set({ imageProvider }),
       setVideoProvider: (videoProvider) => set({ videoProvider }),

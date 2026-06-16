@@ -48,6 +48,26 @@ export const settingsCopy = {
     videoModelLabel: "Video model",
     videoModelHelper: "Image to video model. Needs a shot frame first.",
   },
+  drive: {
+    heading: "Google Drive",
+    intro:
+      "Sign in to mirror this workspace to your own Google Drive. Local storage keeps working until you do.",
+    clientIdLabel: "Google client id",
+    clientIdHelper:
+      "An OAuth client id from your Google Cloud console. Stored only in this browser.",
+    clientIdPlaceholder: "Paste your Google OAuth client id",
+    signIn: "Sign in with Google",
+    signOut: "Sign out",
+    signingIn: "Signing in",
+    signedInAs: (email: string): string =>
+      email.length > 0 ? `Signed in as ${email}` : "Signed in",
+    modeLocalNote:
+      "Storage mode is local. Projects and assets live in this browser only.",
+    modeDriveNote:
+      "Storage mode is Drive. Changes sync to the Vixio Studio folder in your Drive.",
+    syncing: "Syncing to Drive",
+    syncIdle: "Workspace is up to date",
+  },
   workspace: {
     heading: "Workspace",
     deleteTitle: "Delete all local data",
