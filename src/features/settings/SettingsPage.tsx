@@ -18,6 +18,7 @@ import { settingsCopy } from "./copy";
 const PROVIDER_OPTIONS = [
   { value: "vixio-preview", label: settingsCopy.providers.preview },
   { value: "gemini", label: settingsCopy.providers.gemini },
+  { value: "fal", label: settingsCopy.providers.fal },
 ] as const satisfies readonly { value: ProviderChoice; label: string }[];
 
 type ProviderRowProps = {
@@ -52,6 +53,10 @@ export const SettingsPage = () => {
   const geminiTextModel = useSettingsStore((state) => state.geminiTextModel);
   const geminiImageModel = useSettingsStore((state) => state.geminiImageModel);
   const geminiVideoModel = useSettingsStore((state) => state.geminiVideoModel);
+  const falApiKey = useSettingsStore((state) => state.falApiKey);
+  const falTextModel = useSettingsStore((state) => state.falTextModel);
+  const falImageModel = useSettingsStore((state) => state.falImageModel);
+  const falVideoModel = useSettingsStore((state) => state.falVideoModel);
   const setTextProvider = useSettingsStore((state) => state.setTextProvider);
   const setImageProvider = useSettingsStore((state) => state.setImageProvider);
   const setVideoProvider = useSettingsStore((state) => state.setVideoProvider);
@@ -59,6 +64,10 @@ export const SettingsPage = () => {
   const setGeminiTextModel = useSettingsStore((state) => state.setGeminiTextModel);
   const setGeminiImageModel = useSettingsStore((state) => state.setGeminiImageModel);
   const setGeminiVideoModel = useSettingsStore((state) => state.setGeminiVideoModel);
+  const setFalApiKey = useSettingsStore((state) => state.setFalApiKey);
+  const setFalTextModel = useSettingsStore((state) => state.setFalTextModel);
+  const setFalImageModel = useSettingsStore((state) => state.setFalImageModel);
+  const setFalVideoModel = useSettingsStore((state) => state.setFalVideoModel);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -184,6 +193,78 @@ export const SettingsPage = () => {
                   className="font-mono text-[13px]"
                   value={geminiVideoModel}
                   onChange={(event) => setGeminiVideoModel(event.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </section>
+
+        <section
+          aria-labelledby="settings-fal"
+          className="mt-6 border-t border-line pt-6"
+        >
+          <h2
+            id="settings-fal"
+            className="font-display text-lg font-bold tracking-[-0.02em]"
+          >
+            {settingsCopy.fal.heading}
+          </h2>
+          <div className="mt-5 flex flex-col gap-5">
+            <Field
+              label={settingsCopy.fal.keyLabel}
+              helper={settingsCopy.fal.keyHelper}
+            >
+              {({ inputId, describedBy }) => (
+                <TextInput
+                  id={inputId}
+                  aria-describedby={describedBy}
+                  type="password"
+                  autoComplete="off"
+                  placeholder={settingsCopy.fal.keyPlaceholder}
+                  value={falApiKey}
+                  onChange={(event) => setFalApiKey(event.target.value)}
+                />
+              )}
+            </Field>
+            <Field
+              label={settingsCopy.fal.textModelLabel}
+              helper={settingsCopy.fal.textModelHelper}
+            >
+              {({ inputId, describedBy }) => (
+                <TextInput
+                  id={inputId}
+                  aria-describedby={describedBy}
+                  className="font-mono text-[13px]"
+                  value={falTextModel}
+                  onChange={(event) => setFalTextModel(event.target.value)}
+                />
+              )}
+            </Field>
+            <Field
+              label={settingsCopy.fal.imageModelLabel}
+              helper={settingsCopy.fal.imageModelHelper}
+            >
+              {({ inputId, describedBy }) => (
+                <TextInput
+                  id={inputId}
+                  aria-describedby={describedBy}
+                  className="font-mono text-[13px]"
+                  value={falImageModel}
+                  onChange={(event) => setFalImageModel(event.target.value)}
+                />
+              )}
+            </Field>
+            <Field
+              label={settingsCopy.fal.videoModelLabel}
+              helper={settingsCopy.fal.videoModelHelper}
+            >
+              {({ inputId, describedBy }) => (
+                <TextInput
+                  id={inputId}
+                  aria-describedby={describedBy}
+                  className="font-mono text-[13px]"
+                  value={falVideoModel}
+                  onChange={(event) => setFalVideoModel(event.target.value)}
                 />
               )}
             </Field>

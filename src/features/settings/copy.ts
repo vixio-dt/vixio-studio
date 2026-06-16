@@ -10,8 +10,9 @@ export const settingsCopy = {
   providers: {
     heading: "Providers",
     intro: "Choose what renders each kind of generation.",
-    preview: "Preview renderer",
+    preview: "Preview",
     gemini: "Gemini",
+    fal: "fal.ai",
     text: {
       label: "Text",
       hint: "Script and shot list drafting",
@@ -34,6 +35,18 @@ export const settingsCopy = {
     imageModelLabel: "Image model",
     videoModelLabel: "Video model",
     note: "Without a key, everything runs on the built-in preview renderer.",
+  },
+  fal: {
+    heading: "fal.ai",
+    keyLabel: "API key",
+    keyHelper: "Stored only in this browser. Format is key_id:key_secret.",
+    keyPlaceholder: "Paste your fal.ai key",
+    textModelLabel: "Text model",
+    textModelHelper: "any-llm model id, for example anthropic/claude-3.5-sonnet.",
+    imageModelLabel: "Image model",
+    imageModelHelper: "For example fal-ai/flux/schnell for fast drafts.",
+    videoModelLabel: "Video model",
+    videoModelHelper: "Image to video model. Needs a shot frame first.",
   },
   workspace: {
     heading: "Workspace",
