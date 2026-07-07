@@ -53,14 +53,19 @@ engines that share one project graph:
 
 - The browser stays the authoring surface and keeps the local-first, BYOK
   model: keys in `useSettingsStore` (localStorage), media in IndexedDB,
-  provider calls that are CORS-viable (Gemini, fal) stay browser-direct.
+  provider calls that are CORS-viable stay browser-direct (verified: Gemini,
+  fal, ElevenLabs, and the Meshy task API all accept browser calls with the
+  user's key).
 - Build out the already-planned VPS service (`deploy/`) into a **render and
   orchestration worker** behind Traefik, alongside PocketBase: a small typed
-  HTTP API + job queue that handles (a) provider APIs that require server-side
-  secrets or lack CORS (Higgsfield, Runway, Moonvalley, ElevenLabs, Meshy),
-  (b) ffmpeg final renders, (c) previz-pass encoding, (d) webhook receipt from
-  queue-based providers. Jobs are polled/pushed back to the SPA; artifacts are
-  stored and served from the VPS with signed URLs.
+  HTTP API + job queue that handles (a) providers that are server-side
+  intended or partially CORS-blocked (Higgsfield, Runway, Moonvalley via fal
+  is fine; Meshy asset-CDN downloads must be proxied — `assets.meshy.ai` has
+  no CORS), (b) ffmpeg final renders, (c) previz-pass encoding, (d) webhook
+  receipt from queue-based providers (`?fal_webhook=`, `?hf_webhook=`),
+  (e) rehosting Higgsfield outputs immediately (they expire in ~7 days). Jobs
+  are polled/pushed back to the SPA; artifacts are stored and served from the
+  VPS with signed URLs.
 - BYOK extends to the worker: the browser sends the user's provider key with
   each job over TLS; the worker holds keys in memory per job and never
   persists them. Persisted server-side key storage is out of scope.
@@ -148,16 +153,25 @@ Adopt from TapNow (verified findings below), then exceed it:
    is wired automatically for every shot the character appears in.
 6. **Audio as an independent layer** (TapNow cannot do this): per-shot and
    per-scene audio lanes — dialogue TTS with per-character voice casting
-   (ElevenLabs voice design; store a voice id per character), ambience/SFX,
-   and score (generated music) — mixed independently of whichever video model
-   produced the picture. Waveforms and mute/solo/gain per lane in the cut.
+   (ElevenLabs voice design; store a voice id per character; use
+   `/with-timestamps` alignment to drive subtitles and lipsync timing;
+   `/v1/text-to-dialogue` for multi-speaker scenes), ambience/SFX
+   (`/v1/sound-generation`, or `fal-ai/mmaudio-v2` to sonify a silent video
+   clip), and score (ElevenLabs Music `music_v2` with `/v1/music/plan`) —
+   mixed independently of whichever video model produced the picture.
+   Optional lipsync pass per dialogue shot: `fal-ai/sync-lipsync/v2` (v3 as
+   the premium tier). Waveforms and mute/solo/gain per lane in the cut.
 7. **Real final render + NLE handoff** (TapNow's most-cited exit reason):
    worker-side ffmpeg render implementing the spec in `docs/study/critic.md`
-   §1/§4 — xfade transitions with atrim'd audio, drawtext subtitles with the
-   documented two-line split, `libx264 -crf 18 -pix_fmt yuv420p` + aac,
-   `+faststart` — at 1080p and 4K, plus burned or sidecar SRT. Also export
-   OTIO or EDL/FCPXML + media folder for NLE finish. Browser ffmpeg.wasm
-   remains the no-worker fallback with its limits stated inline.
+   §1/§4 combined with the assembly practice in the appendix: ffprobe and
+   normalize every clip first (AI models emit mismatched codecs/fps), xfade
+   transitions with offsets computed from probed durations, pairwise
+   acrossfade, `amix` + sidechain ducking of music under dialogue, two-pass
+   loudnorm to -16 LUFS, subtitles via libass, `libx264 -crf 18 -pix_fmt
+   yuv420p` + aac, `+faststart` — at 1080p and 4K, plus burned or sidecar
+   SRT. Also export OTIO or EDL/FCPXML + media folder for NLE finish. Browser
+   ffmpeg.wasm remains the no-worker fallback with its limits stated inline
+   (2GB memory ceiling, ~10x slower, previews and single clips only).
 
 ## Workstream C: AI comic engine
 
@@ -213,11 +227,16 @@ are shared verbatim. Comic mode replaces board/frames/motion/cut with:
 
 ## MCP servers and dev tooling
 
-The user can supply the Higgsfield MCP server, the Meshy MCP server, and any
-other tool needed — ask for them at the start of the build session and use
-them to live-verify request/response contracts before hardcoding them into
-provider modules. Where an MCP contract and public docs disagree, trust the
-MCP's live responses.
+The user can supply MCP servers and keys for dev-time verification — ask for
+them at the start of the build session and use them to live-verify
+request/response contracts before hardcoding them into provider modules.
+Official servers exist for all three: Higgsfield hosted MCP at
+`https://mcp.higgsfield.ai/mcp` (OAuth, no API key), Meshy
+`@meshy-ai/meshy-mcp-server` (npm; Meshy also has a test key,
+`msy_dummy_api_key_for_test_mode_12345678`, that returns canned results free
+of charge — use it in automated tests), and `elevenlabs-mcp` (Python/uvx).
+Where an MCP contract and public docs disagree, trust the MCP's live
+responses.
 
 ## Delivery discipline
 
@@ -320,5 +339,89 @@ Blender Rigify. In-browser: `AnimationMixer` plays Mixamo/Meshy GLB clips;
 
 ### Provider stack quick reference
 
-<!-- PROVIDER-STACK: filled from the provider research report -->
+**fal.ai** — primary aggregator. Queue API: `POST https://queue.fal.run/
+{model-id}` with `Authorization: Key ...` returns `{request_id, status_url,
+response_url, cancel_url}`; poll or SSE `.../status/stream`; webhook via
+`?fal_webhook=` (15s timeout, 10 retries over 2h); `https://fal.run/...` sync
+for short jobs. Per-model machine-readable docs at
+`fal.ai/models/{slug}/llms.txt`. Browser-direct calls work with a user key
+(no CORS block); vendor guidance prefers a proxy — BYOK browser-direct is the
+default here, worker proxy optional.
+
+- Frames and keyframes: `fal-ai/nano-banana-pro[/edit]` (Gemini 3 Pro image;
+  14 reference images, identity lock for up to 5 people, legible in-image
+  text, $0.15) for quality; `fal-ai/flux-2-pro[/edit]` (10 refs) and
+  `fal-ai/flux-pro/v1.1-ultra` for photoreal; `fal-ai/bytedance/seedream/
+  v4.5/edit` ($0.04, 10 refs) budget; `fal-ai/flux-pro/kontext[/max]` for
+  identity-locked edits.
+- Video: `fal-ai/kling-video/v3/pro/image-to-video` default (native audio,
+  3-15s, character elements); `fal-ai/veo3.1[/image-to-video]` premium (4K +
+  audio, first-last-frame endpoint); `fal-ai/sora-2/image-to-video/pro`
+  stylistic alternative; `fal-ai/veo3.1/lite` and `wan/v2.6/image-to-video`
+  budget. Previz-driven and restyle endpoints are in the camera section
+  above.
+- Audio on fal: `fal-ai/elevenlabs/tts/eleven-v3`, `fal-ai/minimax/
+  speech-02-hd`, `fal-ai/dia-tts` (multi-speaker); music `fal-ai/elevenlabs/
+  music`, `fal-ai/minimax-music/v2`; SFX `fal-ai/elevenlabs/sound-effects`;
+  `fal-ai/mmaudio-v2` sonifies an existing silent clip ($0.001/s).
+- Lipsync: `fal-ai/sync-lipsync/v2` default, `/v3` premium;
+  `fal-ai/bytedance/omnihuman/v1.5` for image+audio talking heads.
+- LoRA: `fal-ai/flux-2-trainer` + `fal-ai/flux-2/lora` for book-wide style or
+  hero-character locks.
+
+**Higgsfield** — official self-serve API: keys at `cloud.higgsfield.ai`,
+docs at `docs.higgsfield.ai` (llms.txt index), base
+`https://platform.higgsfield.ai`, auth `Authorization: Key {id}:{secret}`,
+queue `POST /{model_id}` (e.g. `higgsfield-ai/dop/standard`,
+`higgsfield-ai/soul/standard`), `GET /requests/{id}/status`, webhook
+`?hf_webhook=`. The camera-preset surface (`motions: [{id, strength}]`,
+`getMotions()`) lives in the V1 SDK layer (`@higgsfield/client`). Soul ID
+trains a persistent character identity from ~20 photos in minutes. Outputs
+expire in ~7 days — the worker rehosts them on receipt. Server-side
+intended; route through the worker.
+
+**Meshy** — base `https://api.meshy.ai`, `Authorization: Bearer msy_...`,
+async tasks with SSE streams. Endpoints: `/openapi/v2/text-to-3d`
+(preview then refine), `/openapi/v1/image-to-3d`, `/openapi/v1/
+multi-image-to-3d` (1-4 images — feed character turnarounds),
+`/openapi/v1/retexture`, `/openapi/v1/rigging` (humanoid, ≤300k faces),
+`/openapi/v1/animations` (~600 preset clips via `action_id`),
+`/openapi/v1/remesh`. Outputs GLB/FBX/USDZ/OBJ with PBR maps; `ai_model`
+default meshy-6. Task API is browser-callable, but `assets.meshy.ai` has no
+CORS: GLB downloads for the Three.js viewer go through the worker proxy. API
+requires their Pro tier.
+
+**ElevenLabs** — models: `eleven_v3` flagship (inline audio tags like
+[whispers], [laughs]), `eleven_multilingual_v2` default, `eleven_flash_v2_5`
+low-latency. `POST /v1/text-to-speech/{voice_id}` (use `/with-timestamps`
+for character-level alignment feeding subtitles and lipsync),
+`POST /v1/text-to-dialogue` (multi-speaker, ≤10 voices, v3),
+`POST /v1/text-to-voice/design` (voice design; store the chosen voice id on
+the Character), `POST /v1/voices/add` (cloning), `POST /v1/sound-generation`
+(0.5-30s SFX, loop support), `POST /v1/music` + free `POST /v1/music/plan`
+(`music_v2`, section-level control, commercially cleared for film). CORS is
+`*`, so this is the easiest true browser-direct BYOK integration.
+
+**Final render worker** — ffprobe every clip, normalize per clip (scale/pad
+to target, fps, `format=yuv420p`, `setsar=1`, `aresample=48000`, inject
+`anullsrc` for silent clips), concat demuxer when uniform else concat
+filter; `xfade` with offsets computed in code from probed durations;
+pairwise `acrossfade`; `amix=normalize=0` plus `sidechaincompress` to duck
+music under dialogue; two-pass `loudnorm` to -16 LUFS / TP -1.5; subtitles
+via libass (ship fonts in the worker image); deliver `libx264 -crf 18-20
+-preset medium -pix_fmt yuv420p -profile:v high -level 4.1` + aac 192k +
+`-movflags +faststart`. Queue: pg-boss (Postgres SKIP LOCKED) is enough at
+this volume; progress from `-progress pipe:1` streamed to the SPA.
+ffmpeg.wasm fallback: 2GB memory ceiling, ~10x slower, single-clip scope.
+
+**Comic panel engines** — default `fal-ai/nano-banana-2/edit` (Gemini 3.1
+Flash Image, $0.08, 14 refs, validated typography); budget
+`fal-ai/bytedance/seedream/v4.5/edit`; series style-lock via FLUX.2 LoRA.
+Practice: generate a 3-5 angle character sheet first and feed it as
+references on every panel; keep balloons and lettering as vector overlays
+in-app (never baked into pixels; bake only diegetic signage/SFX text).
+Authentic manga screentone: SDXL anime checkpoints (Animagine XL 4.0,
+Illustrious XL, NoobAI) via `fal-ai/lora`. Research caveat: reference-based
+editors can preserve identity too rigidly (stiff poses) — multi-pose
+character sheets mitigate.
 
