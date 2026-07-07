@@ -93,7 +93,7 @@ export const geminiRequest = async (
   }
 
   if (!response.ok) {
-    let detail = "";
+    let detail: string;
     try {
       detail = readApiErrorDetail(await response.json());
     } catch {

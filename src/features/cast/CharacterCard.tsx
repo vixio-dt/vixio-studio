@@ -1,5 +1,5 @@
 import { DiceFive, Trash } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   Button,
@@ -237,10 +237,11 @@ type NameInputProps = {
 const NameInput = ({ character }: NameInputProps) => {
   const updateCharacter = useProjectsStore((state) => state.updateCharacter);
   const [draft, setDraft] = useState(character.name);
-
-  useEffect(() => {
+  const [committedName, setCommittedName] = useState(character.name);
+  if (character.name !== committedName) {
+    setCommittedName(character.name);
     setDraft(character.name);
-  }, [character.name]);
+  }
 
   const commit = () => {
     const next = draft.trim();
