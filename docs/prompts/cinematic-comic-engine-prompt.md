@@ -75,6 +75,17 @@ engines that share one project graph:
 
 ## Workstream A: provider platform + BYOK settings
 
+**Provider strategy (decided): fal.ai is the tier-1, default provider for
+every generation kind.** It covers images, video (including the whole
+previz-driven set), audio, lipsync, and LoRA training under one queue API,
+is already integrated, and accepts browser-direct BYOK calls, so the
+pipeline works before the worker exists. Tier 1 also includes ElevenLabs
+direct (audio: dialogue, timestamps, music plans; open CORS) and Meshy (3D).
+Tier 2, added through the same registry once the worker is up, in order:
+Runway direct (Aleph restyle + Act-Two performance, not on fal), then
+Higgsfield (DoP camera presets as a fast path beside previz, Soul ID as a
+consistency alternative). Build order follows the tiers.
+
 Extend the existing BYOK settings (fal and Gemini keys already exist in
 `src/stores/settings.ts` — do not rebuild them, extend the pattern):
 
