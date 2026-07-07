@@ -1,6 +1,8 @@
 type SegmentedOption<TValue extends string> = {
   value: TValue;
   label: string;
+  /** Optional data-testid for the option's button. */
+  testId?: string;
 };
 
 type SegmentedProps<TValue extends string> = {
@@ -32,6 +34,7 @@ export const Segmented = <TValue extends string>({
           type="button"
           role="radio"
           aria-checked={selected}
+          data-testid={option.testId}
           onClick={() => onChange(option.value)}
           className={`${size === "sm" ? "h-7 px-2.5 text-xs" : "h-9 px-3 text-[13px]"} whitespace-nowrap transition-colors duration-150 ${
             selected

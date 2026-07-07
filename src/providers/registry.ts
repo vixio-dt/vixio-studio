@@ -6,10 +6,16 @@ import {
   geminiTextProvider,
   geminiVideoProvider,
 } from "./gemini";
+import { previewAudioProvider } from "./mock/audio";
 import { previewImageProvider } from "./mock/image";
 import { previewTextProvider } from "./mock/text";
 import { previewVideoProvider } from "./mock/video";
-import type { ImageProvider, TextProvider, VideoProvider } from "./types";
+import type {
+  AudioProvider,
+  ImageProvider,
+  TextProvider,
+  VideoProvider,
+} from "./types";
 
 /**
  * Providers resolve at call time so settings changes apply to the next
@@ -43,4 +49,21 @@ export const resolveVideoProvider = (): VideoProvider => {
   if (videoProvider === "gemini" && hasGeminiKey()) return geminiVideoProvider;
   if (videoProvider === "fal" && hasFalKey()) return falVideoProvider;
   return previewVideoProvider;
+};
+
+const hasElevenLabsKey = (): boolean =>
+  useSettingsStore.getState().elevenLabsApiKey.trim().length > 0;
+
+/**
+ * The ElevenLabs and fal audio implementations plug in on the two branches
+ * below; until they land, a configured choice resolves to the offline preview
+ * synth, exactly as a missing key would.
+ */
+export const resolveAudioProvider = (): AudioProvider => {
+  const { audioProvider } = useSettingsStore.getState();
+  if (audioProvider === "elevenlabs" && hasElevenLabsKey()) {
+    return previewAudioProvider;
+  }
+  if (audioProvider === "fal" && hasFalKey()) return previewAudioProvider;
+  return previewAudioProvider;
 };

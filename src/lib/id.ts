@@ -6,8 +6,10 @@ export type ShotId = Brand<string, "ShotId">;
 export type CharacterId = Brand<string, "CharacterId">;
 export type AssetId = Brand<string, "AssetId">;
 export type TaskId = Brand<string, "TaskId">;
+export type PageId = Brand<string, "PageId">;
+export type PanelId = Brand<string, "PanelId">;
 
-type IdPrefix = "prj" | "scn" | "sht" | "chr" | "ast" | "tsk";
+type IdPrefix = "prj" | "scn" | "sht" | "chr" | "ast" | "tsk" | "pag" | "pnl";
 
 const entropy = (): string =>
   crypto.randomUUID().replaceAll("-", "").slice(0, 16);
@@ -23,3 +25,5 @@ export const createCharacterId = (): CharacterId =>
   createId("chr") as CharacterId;
 export const createAssetId = (): AssetId => createId("ast") as AssetId;
 export const createTaskId = (): TaskId => createId("tsk") as TaskId;
+export const createPageId = (): PageId => createId("pag") as PageId;
+export const createPanelId = (): PanelId => createId("pnl") as PanelId;

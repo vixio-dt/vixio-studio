@@ -29,6 +29,11 @@ export const projectsCopy = {
   },
   newProject: {
     title: "New project",
+    modeLabel: "Mode",
+    modeFilm: "Film",
+    modeComic: "Comic",
+    modeHelperFilm: "Script, cast, board, previz, frames, motion, and the cut.",
+    modeHelperComic: "Script, cast, pages, panels, and export.",
     titleLabel: "Title",
     titlePlaceholder: "The lighthouse keeper",
     titleRequired: "Enter a title.",

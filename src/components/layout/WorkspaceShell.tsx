@@ -1,18 +1,28 @@
 import {
   Aperture,
+  BookOpen,
+  Cube,
+  Export,
   FilmReel,
   FilmSlate,
   FilmStrip,
   GearSix,
+  PaintBrush,
   Queue,
   SquaresFour,
   UsersThree,
+  type Icon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui";
-import { findVisualStyle } from "@/domain/constants";
+import {
+  DEFAULT_COMIC_STYLE_ID,
+  findComicStyle,
+  findVisualStyle,
+} from "@/domain/constants";
+import type { Project } from "@/domain/types";
 import type { ProjectId } from "@/lib/id";
 import { useProjectsStore } from "@/stores/projects";
 import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
@@ -20,14 +30,30 @@ import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
 import { AccountChip } from "./AccountChip";
 import { TaskDrawer } from "./TaskDrawer";
 
-const NAV_ITEMS = [
+type NavItem = { to: string; label: string; icon: Icon };
+
+const FILM_NAV_ITEMS: readonly NavItem[] = [
   { to: "script", label: "Script", icon: FilmSlate },
   { to: "cast", label: "Cast", icon: UsersThree },
   { to: "storyboard", label: "Board", icon: SquaresFour },
+  { to: "previz", label: "Previz", icon: Cube },
   { to: "framelab", label: "Frames", icon: Aperture },
   { to: "motion", label: "Motion", icon: FilmReel },
   { to: "timeline", label: "Cut", icon: FilmStrip },
-] as const;
+];
+
+const COMIC_NAV_ITEMS: readonly NavItem[] = [
+  { to: "script", label: "Script", icon: FilmSlate },
+  { to: "cast", label: "Cast", icon: UsersThree },
+  { to: "pages", label: "Pages", icon: BookOpen },
+  { to: "panels", label: "Panels", icon: PaintBrush },
+  { to: "export", label: "Export", icon: Export },
+];
+
+const styleBadgeLabel = (project: Project): string =>
+  project.mode === "comic"
+    ? findComicStyle(project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID).label
+    : findVisualStyle(project.styleId).name;
 
 /**
  * Workspace chrome: a 64px icon rail, a slim top bar, and the working canvas.
@@ -75,7 +101,7 @@ export const WorkspaceShell = () => {
           <h1 className="truncate font-display text-base font-bold tracking-[-0.02em]">
             {project.title}
           </h1>
-          <Badge>{findVisualStyle(project.styleId).name}</Badge>
+          <Badge>{styleBadgeLabel(project)}</Badge>
           <span className="font-mono text-xs text-fg-muted">
             {project.aspectRatio}
           </span>
@@ -107,22 +133,25 @@ export const WorkspaceShell = () => {
         aria-label="Workspace"
         className="col-start-1 row-start-2 flex flex-col items-stretch border-r border-line bg-ink-panel pt-2"
       >
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-1 py-3 text-[10px] transition-colors ${
-                isActive
-                  ? "border-r border-accent-media bg-ink-raised text-fg"
-                  : "text-fg-muted hover:bg-ink-hover hover:text-fg-secondary"
-              }`
-            }
-          >
-            <Icon size={20} aria-hidden />
-            {label}
-          </NavLink>
-        ))}
+        {(project.mode === "comic" ? COMIC_NAV_ITEMS : FILM_NAV_ITEMS).map(
+          ({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              data-testid={`nav-${to}`}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-1 py-3 text-[10px] transition-colors ${
+                  isActive
+                    ? "border-r border-accent-media bg-ink-raised text-fg"
+                    : "text-fg-muted hover:bg-ink-hover hover:text-fg-secondary"
+                }`
+              }
+            >
+              <Icon size={20} aria-hidden />
+              {label}
+            </NavLink>
+          ),
+        )}
       </nav>
 
       <main className="col-start-2 row-start-2 min-w-0 overflow-hidden">

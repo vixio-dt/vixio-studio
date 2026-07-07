@@ -4,9 +4,11 @@ import type { Asset } from "@/domain/types";
 import type { AssetId } from "@/lib/id";
 
 /**
- * Assets (generated frames and clips) are blobs, far too large for
- * localStorage. They live in IndexedDB; the store holds an in-memory index
- * with object URLs hydrated on boot.
+ * Assets (generated frames, clips, audio, and 3d models) are blobs, far too
+ * large for localStorage. They live in IndexedDB keyed by their original mime
+ * type; the store holds an in-memory index with object URLs hydrated on boot.
+ * Object URLs are kind-agnostic: the same url feeds <img>, <video>, <audio>,
+ * or a model loader depending on Asset.kind.
  */
 
 const DB_NAME = "vixio-studio";
@@ -197,3 +199,23 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
 export const useAsset = (id: AssetId | null): Asset | null =>
   useAssetsStore((state) => (id ? (state.assets[id] ?? null) : null));
+
+/**
+ * Best-effort duration probe for audio blobs whose metadata the browser can
+ * read cheaply (WAV and most encoded formats). Resolves null when the blob
+ * cannot be decoded; callers should prefer the duration a provider reports.
+ */
+export const probeAudioDuration = (blob: Blob): Promise<number | null> =>
+  new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const audio = document.createElement("audio");
+    const finish = (value: number | null): void => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    audio.onloadedmetadata = () =>
+      finish(Number.isFinite(audio.duration) ? audio.duration : null);
+    audio.onerror = () => finish(null);
+    audio.preload = "metadata";
+    audio.src = url;
+  });

@@ -16,13 +16,30 @@ import {
   PROJECT_FORMATS,
   VISUAL_STYLES,
 } from "@/domain/constants";
-import type { AspectRatio, ProjectFormat } from "@/domain/types";
+import type { AspectRatio, ProjectFormat, ProjectMode } from "@/domain/types";
 import { useProjectsStore } from "@/stores/projects";
 
 import { projectsCopy } from "./copy";
 
 const ASPECT_OPTIONS: readonly { value: AspectRatio; label: string }[] =
   ASPECT_RATIOS.map((ratio) => ({ value: ratio, label: ratio }));
+
+const MODE_OPTIONS: readonly {
+  value: ProjectMode;
+  label: string;
+  testId: string;
+}[] = [
+  {
+    value: "film",
+    label: projectsCopy.newProject.modeFilm,
+    testId: "project-mode-film",
+  },
+  {
+    value: "comic",
+    label: projectsCopy.newProject.modeComic,
+    testId: "project-mode-comic",
+  },
+];
 
 type StylePickerProps = {
   value: string;
@@ -86,6 +103,7 @@ const NewProjectForm = ({ onClose }: NewProjectFormProps) => {
 
   const [title, setTitle] = useState("");
   const [logline, setLogline] = useState("");
+  const [mode, setMode] = useState<ProjectMode>("film");
   const [format, setFormat] = useState<ProjectFormat>("short-film");
   const [genre, setGenre] = useState("");
   const [styleId, setStyleId] = useState<string>(DEFAULT_STYLE_ID);
@@ -111,6 +129,7 @@ const NewProjectForm = ({ onClose }: NewProjectFormProps) => {
     const project = createProject({
       title: title.trim(),
       logline: logline.trim(),
+      mode,
       format,
       genre: genre.trim(),
       styleId,
@@ -121,6 +140,24 @@ const NewProjectForm = ({ onClose }: NewProjectFormProps) => {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+      <Field
+        label={projectsCopy.newProject.modeLabel}
+        helper={
+          mode === "comic"
+            ? projectsCopy.newProject.modeHelperComic
+            : projectsCopy.newProject.modeHelperFilm
+        }
+      >
+        {() => (
+          <Segmented
+            options={MODE_OPTIONS}
+            value={mode}
+            onChange={setMode}
+            ariaLabel={projectsCopy.newProject.modeLabel}
+          />
+        )}
+      </Field>
+
       <Field label={projectsCopy.newProject.titleLabel} error={titleError}>
         {({ inputId, describedBy }) => (
           <TextInput
