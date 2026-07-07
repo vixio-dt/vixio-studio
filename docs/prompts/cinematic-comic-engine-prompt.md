@@ -413,6 +413,15 @@ the Character), `POST /v1/voices/add` (cloning), `POST /v1/sound-generation`
 (`music_v2`, section-level control, commercially cleared for film). CORS is
 `*`, so this is the easiest true browser-direct BYOK integration.
 
+**Suno (watch item, not integrated)** — best-in-class song generation, but
+as of 2026-07-07 it has no official API; all "Suno API" resellers are
+unofficial cookie-scraping wrappers, unusable for BYOK. Suno opened a
+developer-API early-access intake on 2026-07-01 (curated partners, no
+timeline), and its licensing is only partially settled (Warner settled
+2025-11, Sony still litigating with a ruling expected summer 2026). When
+official keys ship, add Suno to the registry as a music provider beside
+ElevenLabs; design the music provider seam so this is a drop-in.
+
 **Final render worker** — ffprobe every clip, normalize per clip (scale/pad
 to target, fps, `format=yuv420p`, `setsar=1`, `aresample=48000`, inject
 `anullsrc` for silent clips), concat demuxer when uniform else concat
