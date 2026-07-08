@@ -78,4 +78,32 @@ export const timelineCopy = {
     hint: "The cut assembles every shot in script order. Write scenes and break them into shots first.",
     action: "Go to script",
   },
+  convert: {
+    title: "Render as comic",
+    hint: "Scenes become pages and shots become panels, sharing the frames you already generated.",
+    disabledNoShots: "Break scenes into shots first, then render them as a comic.",
+    action: "Render as comic",
+    dialogTitle: "Render as comic",
+    planningLabel: "Planning the conversion",
+    planFailed: "Could not plan the conversion.",
+    applyFailed: "Conversion failed.",
+    retry: "Retry",
+    cancel: "Cancel",
+    accept: "Convert",
+    totals: (pages: number, panels: number, updated: number, unchanged: number) =>
+      `${pages} new pages, ${panels} new panels, ${updated} updated, ${unchanged} unchanged`,
+    balloonTotal: (balloons: number) => `${balloons} dialogue balloons`,
+    sceneLabel: (sceneNumber: number, location: string) =>
+      location.trim().length > 0
+        ? `Scene ${sceneNumber}, ${location}`
+        : `Scene ${sceneNumber}`,
+    sceneCounts: (
+      pages: number,
+      panels: number,
+      updated: number,
+      balloons: number,
+    ) => `${pages} pages, ${panels} new panels, ${updated} updated, ${balloons} balloons`,
+    nothingToConvert: "There are no shots to convert yet.",
+    invariant: "Re-running updates converted panels and never duplicates them.",
+  },
 } as const;

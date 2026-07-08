@@ -17,6 +17,7 @@ import {
 } from "@/stores/projects";
 
 import { useActiveProject } from "../shared/useActiveProject";
+import { ConvertToFilm } from "./ConvertToFilm";
 import { comicExportCopy } from "./copy";
 import {
   renderPageBlobs,
@@ -204,6 +205,8 @@ export const ComicExportPage = () => {
           {status.state === "failed" ? status.message : null}
         </p>
       </header>
+
+      <ConvertToFilm project={project} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {pages.length === 0 ? (

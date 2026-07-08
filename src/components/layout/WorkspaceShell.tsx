@@ -14,15 +14,22 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
-import { Link, NavLink, Outlet, useParams } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
-import { Badge } from "@/components/ui";
+import { Badge, Segmented } from "@/components/ui";
 import {
   DEFAULT_COMIC_STYLE_ID,
   findComicStyle,
   findVisualStyle,
 } from "@/domain/constants";
-import type { Project } from "@/domain/types";
+import type { Project, ProjectMode } from "@/domain/types";
 import type { ProjectId } from "@/lib/id";
 import { useProjectsStore } from "@/stores/projects";
 import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
@@ -55,6 +62,11 @@ const styleBadgeLabel = (project: Project): string =>
     ? findComicStyle(project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID).label
     : findVisualStyle(project.styleId).name;
 
+const MODE_OPTIONS = [
+  { value: "film", label: "Film", testId: "mode-switch-film" },
+  { value: "comic", label: "Comic", testId: "mode-switch-comic" },
+] as const satisfies readonly { value: ProjectMode; label: string; testId: string }[];
+
 /**
  * Workspace chrome: a 64px icon rail, a slim top bar, and the working canvas.
  * The chrome stays near-monochrome; the user's frames are the loudest thing
@@ -62,11 +74,40 @@ const styleBadgeLabel = (project: Project): string =>
  */
 export const WorkspaceShell = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const project = useProjectsStore((state) =>
     projectId ? (state.projects[projectId as ProjectId] ?? null) : null,
   );
+  const updateProject = useProjectsStore((state) => state.updateProject);
+  const hasShots = useProjectsStore((state) =>
+    projectId
+      ? Object.values(state.shots).some(
+          (shot) => shot.projectId === (projectId as ProjectId),
+        )
+      : false,
+  );
+  const hasPanels = useProjectsStore((state) =>
+    projectId
+      ? Object.values(state.panels).some(
+          (panel) => panel.projectId === (projectId as ProjectId),
+        )
+      : false,
+  );
   const activeTasks = useTasksStore(selectActiveTaskCount);
   const [queueOpen, setQueueOpen] = useState(false);
+
+  // Flip engines without re-converting; leave film-only or comic-only pages
+  // for the target mode's landing view so the rail always matches the canvas.
+  const handleModeChange = (mode: ProjectMode) => {
+    if (!project || mode === project.mode) return;
+    updateProject(project.id, { mode });
+    const items = mode === "comic" ? COMIC_NAV_ITEMS : FILM_NAV_ITEMS;
+    const currentTab = location.pathname.split("/").pop() ?? "";
+    if (!items.some((item) => item.to === currentTab)) {
+      navigate(mode === "comic" ? "pages" : "storyboard");
+    }
+  };
 
   if (!project) {
     return (
@@ -105,6 +146,15 @@ export const WorkspaceShell = () => {
           <span className="font-mono text-xs text-fg-muted">
             {project.aspectRatio}
           </span>
+          {hasShots && hasPanels ? (
+            <Segmented
+              size="sm"
+              ariaLabel="Engine"
+              options={MODE_OPTIONS}
+              value={project.mode}
+              onChange={handleModeChange}
+            />
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           <AccountChip />

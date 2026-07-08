@@ -24,6 +24,7 @@ import {
 } from "@/stores/projects";
 
 import { AudioLanes } from "./AudioLanes";
+import { ConvertToComic } from "./ConvertToComic";
 import { timelineCopy } from "./copy";
 import {
   buildCutEntries,
@@ -156,6 +157,9 @@ export const TimelinePage = () => {
             </Button>
           }
         />
+        <div className="p-4">
+          <ConvertToComic project={project} />
+        </div>
       </div>
     );
   }
@@ -311,6 +315,8 @@ export const TimelinePage = () => {
           assets={assets}
           tracks={tracks}
         />
+
+        <ConvertToComic project={project} />
       </div>
     </div>
   );

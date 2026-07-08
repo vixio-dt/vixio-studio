@@ -24,4 +24,31 @@ export const comicExportCopy = {
     renderFailed: "Could not render this page.",
     retry: "Retry",
   },
+  convert: {
+    title: "Convert to film",
+    hint: "Panels become shots in reading order, with camera settings suggested from layout and cast.",
+    disabledNoPanels: "Add pages and panels first, then convert them into shots.",
+    disabledNoScenes: "Write scenes in the script first so converted shots have a home.",
+    action: "Convert to film",
+    dialogTitle: "Convert to film",
+    planningLabel: "Planning the conversion",
+    planFailed: "Could not plan the conversion.",
+    applyFailed: "Conversion failed.",
+    retry: "Retry",
+    cancel: "Cancel",
+    accept: "Convert",
+    totals: (creates: number, updates: number, unchanged: number) =>
+      `${creates} new shots, ${updates} updated, ${unchanged} unchanged`,
+    sceneLabel: (sceneNumber: number, location: string) =>
+      location.trim().length > 0
+        ? `Scene ${sceneNumber}, ${location}`
+        : `Scene ${sceneNumber}`,
+    sceneCounts: (creates: number, updates: number, unchanged: number) =>
+      `${creates} new, ${updates} updated, ${unchanged} unchanged`,
+    cameraTitle: "Camera suggestions",
+    cameraItem: (sizeLabel: string, presetLabel: string) =>
+      `${sizeLabel}, ${presetLabel.toLowerCase()}`,
+    nothingToConvert: "There are no panels to convert yet.",
+    invariant: "Re-running updates converted shots and never duplicates them.",
+  },
 } as const;
