@@ -1,6 +1,12 @@
 import { useSettingsStore } from "@/stores/settings";
 
-import { falImageProvider, falTextProvider, falVideoProvider } from "./fal";
+import { elevenLabsAudioProvider } from "./elevenlabs/audio";
+import {
+  falAudioProvider,
+  falImageProvider,
+  falTextProvider,
+  falVideoProvider,
+} from "./fal";
 import {
   geminiImageProvider,
   geminiTextProvider,
@@ -54,16 +60,11 @@ export const resolveVideoProvider = (): VideoProvider => {
 const hasElevenLabsKey = (): boolean =>
   useSettingsStore.getState().elevenLabsApiKey.trim().length > 0;
 
-/**
- * The ElevenLabs and fal audio implementations plug in on the two branches
- * below; until they land, a configured choice resolves to the offline preview
- * synth, exactly as a missing key would.
- */
 export const resolveAudioProvider = (): AudioProvider => {
   const { audioProvider } = useSettingsStore.getState();
   if (audioProvider === "elevenlabs" && hasElevenLabsKey()) {
-    return previewAudioProvider;
+    return elevenLabsAudioProvider;
   }
-  if (audioProvider === "fal" && hasFalKey()) return previewAudioProvider;
+  if (audioProvider === "fal" && hasFalKey()) return falAudioProvider;
   return previewAudioProvider;
 };

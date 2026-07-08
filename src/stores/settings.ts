@@ -43,6 +43,8 @@ type SettingsState = {
   falVideoModel: string;
   falAudioModel: string;
   elevenLabsTtsModel: string;
+  /** Used when a speech request carries no voice id (Rachel by default). */
+  elevenLabsDefaultVoiceId: string;
   setGeminiApiKey: (key: string) => void;
   setFalApiKey: (key: string) => void;
   setElevenLabsApiKey: (key: string) => void;
@@ -60,6 +62,7 @@ type SettingsState = {
   setFalVideoModel: (model: string) => void;
   setFalAudioModel: (model: string) => void;
   setElevenLabsTtsModel: (model: string) => void;
+  setElevenLabsDefaultVoiceId: (voiceId: string) => void;
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -82,6 +85,7 @@ export const useSettingsStore = create<SettingsState>()(
       falVideoModel: "fal-ai/kling-video/v1.6/standard/image-to-video",
       falAudioModel: "fal-ai/elevenlabs/tts/eleven-v3",
       elevenLabsTtsModel: "eleven_multilingual_v2",
+      elevenLabsDefaultVoiceId: "21m00Tcm4TlvDq8ikWAM",
       setGeminiApiKey: (geminiApiKey) => set({ geminiApiKey }),
       setFalApiKey: (falApiKey) => set({ falApiKey }),
       setElevenLabsApiKey: (elevenLabsApiKey) => set({ elevenLabsApiKey }),
@@ -99,6 +103,8 @@ export const useSettingsStore = create<SettingsState>()(
       setFalVideoModel: (falVideoModel) => set({ falVideoModel }),
       setFalAudioModel: (falAudioModel) => set({ falAudioModel }),
       setElevenLabsTtsModel: (elevenLabsTtsModel) => set({ elevenLabsTtsModel }),
+      setElevenLabsDefaultVoiceId: (elevenLabsDefaultVoiceId) =>
+        set({ elevenLabsDefaultVoiceId }),
     }),
     {
       name: "vixio-settings",

@@ -1,6 +1,6 @@
 /**
  * Visible strings for the settings page. Sentence case, no dashes, one verb
- * per intent (Delete destroys).
+ * per intent (Delete destroys, Verify checks a key).
  */
 export const settingsCopy = {
   topBar: {
@@ -13,6 +13,7 @@ export const settingsCopy = {
     preview: "Preview",
     gemini: "Gemini",
     fal: "fal.ai",
+    elevenlabs: "ElevenLabs",
     text: {
       label: "Text",
       hint: "Script and shot list drafting",
@@ -25,6 +26,21 @@ export const settingsCopy = {
       label: "Video",
       hint: "Shot motion clips",
     },
+    audio: {
+      label: "Audio",
+      hint: "Dialogue, music, and ambience",
+    },
+  },
+  verify: {
+    action: "Verify",
+    checking: "Checking the key",
+    valid: "Key accepted",
+    emptyKey: "Enter a key first.",
+    falNetwork: (detail: string) => `Could not reach fal.ai. ${detail}`,
+    falRejected: (status: number) => `fal.ai rejected the key (${status}).`,
+  },
+  models: {
+    pickerHelper: "Pick a known model or type any id.",
   },
   gemini: {
     heading: "Gemini",
@@ -44,9 +60,28 @@ export const settingsCopy = {
     textModelLabel: "Text model",
     textModelHelper: "any-llm model id, for example anthropic/claude-3.5-sonnet.",
     imageModelLabel: "Image model",
-    imageModelHelper: "For example fal-ai/flux/schnell for fast drafts.",
     videoModelLabel: "Video model",
-    videoModelHelper: "Image to video model. Needs a shot frame first.",
+    audioModelLabel: "Audio model",
+    audioModelHelper: "Speech model used when audio routes through fal.",
+  },
+  elevenlabs: {
+    heading: "ElevenLabs",
+    keyLabel: "API key",
+    keyHelper: "Stored only in this browser.",
+    keyPlaceholder: "Paste your ElevenLabs key",
+    voiceLabel: "Default voice id",
+    voiceHelper: "Used when a line has no voice assigned. Rachel by default.",
+    ttsModelLabel: "Speech model",
+    ttsModelHelper: "For example eleven_multilingual_v2 or eleven_v3.",
+  },
+  meshy: {
+    heading: "Meshy",
+    intro: "Unlocks 3d previz generation from prompts and frames.",
+    keyLabel: "API key",
+    keyHelper: "Stored only in this browser.",
+    keyPlaceholder: "Paste your Meshy key",
+    testKeyNote:
+      "The test key msy_dummy_api_key_for_test_mode_12345678 returns canned results without spending credits.",
   },
   drive: {
     heading: "Google Drive",

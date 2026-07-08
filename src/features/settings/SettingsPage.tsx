@@ -1,20 +1,30 @@
-import { ArrowLeft, CloudCheck, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, CheckCircle, CloudCheck, Trash } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { signIn, signOut } from "@/cloud/sync";
-import { Button, Dialog, Field, Segmented, TextInput } from "@/components/ui";
+import { BusyDots, Button, Dialog, Field, Segmented, TextInput } from "@/components/ui";
+import type { ModelInfo } from "@/domain/modelRegistry";
+import { modelsFor } from "@/domain/modelRegistry";
+import type { Result } from "@/lib/result";
 import { useSessionStore } from "@/stores/session";
-import type { ProviderChoice } from "@/stores/settings";
+import type { AudioProviderChoice, ProviderChoice } from "@/stores/settings";
 import { useSettingsStore } from "@/stores/settings";
 
 import { settingsCopy } from "./copy";
+import {
+  verifyElevenLabsKey,
+  verifyFalKey,
+  verifyGeminiKey,
+  verifyMeshyKey,
+} from "./verify";
 
 /**
- * Settings: a quiet full page outside the workspace shell. Three sections
- * separated by hairlines: provider routing, Gemini configuration, and the
- * local data danger row. Everything binds straight to the settings store,
- * which persists synchronously to localStorage.
+ * Settings: a quiet full page outside the workspace shell. Sections separated
+ * by hairlines: provider routing, one section per provider (key with an
+ * inline Verify check, then model ids), Drive sync, and the local data danger
+ * row. Everything binds straight to the settings store, which persists
+ * synchronously to localStorage.
  */
 
 const PROVIDER_OPTIONS = [
@@ -23,22 +33,47 @@ const PROVIDER_OPTIONS = [
   { value: "fal", label: settingsCopy.providers.fal },
 ] as const satisfies readonly { value: ProviderChoice; label: string }[];
 
-type ProviderRowProps = {
+const AUDIO_PROVIDER_OPTIONS = [
+  {
+    value: "vixio-preview",
+    label: settingsCopy.providers.preview,
+    testId: "audio-provider-preview",
+  },
+  {
+    value: "elevenlabs",
+    label: settingsCopy.providers.elevenlabs,
+    testId: "audio-provider-elevenlabs",
+  },
+  { value: "fal", label: settingsCopy.providers.fal, testId: "audio-provider-fal" },
+] as const satisfies readonly {
+  value: AudioProviderChoice;
+  label: string;
+  testId: string;
+}[];
+
+type ProviderRowProps<TValue extends string> = {
   label: string;
   hint: string;
-  value: ProviderChoice;
-  onChange: (value: ProviderChoice) => void;
+  options: readonly { value: TValue; label: string; testId?: string }[];
+  value: TValue;
+  onChange: (value: TValue) => void;
 };
 
 /** One generation kind: label and hint left, segmented choice right. Stacks below 640px. */
-const ProviderRow = ({ label, hint, value, onChange }: ProviderRowProps) => (
+const ProviderRow = <TValue extends string>({
+  label,
+  hint,
+  options,
+  value,
+  onChange,
+}: ProviderRowProps<TValue>) => (
   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
     <div className="flex flex-col gap-0.5">
       <span className="text-[13px] font-medium text-fg-secondary">{label}</span>
       <span className="text-xs text-fg-muted">{hint}</span>
     </div>
     <Segmented
-      options={PROVIDER_OPTIONS}
+      options={options}
       value={value}
       onChange={onChange}
       ariaLabel={label}
@@ -46,6 +81,169 @@ const ProviderRow = ({ label, hint, value, onChange }: ProviderRowProps) => (
     />
   </div>
 );
+
+/* ------------------------------------------------------------------ */
+/* Key field with inline verification                                  */
+/* ------------------------------------------------------------------ */
+
+type VerifyStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "valid" }
+  | { state: "invalid"; message: string };
+
+type VerifiedKeyFieldProps = {
+  label: string;
+  helper: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  inputTestId: string;
+  verifyTestId: string;
+  verify: (key: string) => Promise<Result<null>>;
+};
+
+/**
+ * Password input with a Verify action beside it. The check result renders
+ * inline below the row: checking, accepted, or the provider's own error
+ * string. Editing the key resets the state to idle.
+ */
+const VerifiedKeyField = ({
+  label,
+  helper,
+  placeholder,
+  value,
+  onChange,
+  inputTestId,
+  verifyTestId,
+  verify,
+}: VerifiedKeyFieldProps) => {
+  const [status, setStatus] = useState<VerifyStatus>({ state: "idle" });
+
+  const handleVerify = async () => {
+    const key = value.trim();
+    if (key.length === 0) {
+      setStatus({ state: "invalid", message: settingsCopy.verify.emptyKey });
+      return;
+    }
+    setStatus({ state: "checking" });
+    const result = await verify(key);
+    setStatus(
+      result.ok
+        ? { state: "valid" }
+        : { state: "invalid", message: result.error.message },
+    );
+  };
+
+  return (
+    <Field label={label} helper={helper}>
+      {({ inputId, describedBy }) => (
+        <>
+          <div className="flex gap-2">
+            <TextInput
+              id={inputId}
+              aria-describedby={describedBy}
+              type="password"
+              autoComplete="off"
+              data-testid={inputTestId}
+              placeholder={placeholder}
+              value={value}
+              onChange={(event) => {
+                onChange(event.target.value);
+                if (status.state !== "idle") setStatus({ state: "idle" });
+              }}
+              className="flex-1"
+            />
+            <Button
+              variant="outline"
+              data-testid={verifyTestId}
+              busy={status.state === "checking"}
+              onClick={() => {
+                void handleVerify();
+              }}
+            >
+              {settingsCopy.verify.action}
+            </Button>
+          </div>
+          {status.state === "checking" ? (
+            <p
+              role="status"
+              className="inline-flex items-center gap-2 text-xs text-fg-muted"
+            >
+              <BusyDots />
+              {settingsCopy.verify.checking}
+            </p>
+          ) : status.state === "valid" ? (
+            <p
+              role="status"
+              className="inline-flex items-center gap-1.5 text-xs text-fg-secondary"
+            >
+              <CheckCircle size={14} className="text-accent" aria-hidden />
+              {settingsCopy.verify.valid}
+            </p>
+          ) : status.state === "invalid" ? (
+            <p role="alert" className="text-xs text-danger">
+              {status.message}
+            </p>
+          ) : null}
+        </>
+      )}
+    </Field>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* Model id field with a registry-fed datalist                         */
+/* ------------------------------------------------------------------ */
+
+type ModelFieldProps = {
+  label: string;
+  helper?: string;
+  value: string;
+  onChange: (value: string) => void;
+  /** Registry suggestions; the input stays free text either way. */
+  models?: readonly ModelInfo[];
+  listId?: string;
+};
+
+const ModelField = ({
+  label,
+  helper,
+  value,
+  onChange,
+  models,
+  listId,
+}: ModelFieldProps) => {
+  const hasList = models !== undefined && models.length > 0 && listId !== undefined;
+  return (
+    <Field
+      label={label}
+      helper={helper ?? (hasList ? settingsCopy.models.pickerHelper : undefined)}
+    >
+      {({ inputId, describedBy }) => (
+        <>
+          <TextInput
+            id={inputId}
+            aria-describedby={describedBy}
+            className="font-mono text-[13px]"
+            list={hasList ? listId : undefined}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          {hasList ? (
+            <datalist id={listId}>
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </datalist>
+          ) : null}
+        </>
+      )}
+    </Field>
+  );
+};
 
 /**
  * Google Drive sign-in and storage mode. When signed out the section reads
@@ -141,6 +339,7 @@ export const SettingsPage = () => {
   const textProvider = useSettingsStore((state) => state.textProvider);
   const imageProvider = useSettingsStore((state) => state.imageProvider);
   const videoProvider = useSettingsStore((state) => state.videoProvider);
+  const audioProvider = useSettingsStore((state) => state.audioProvider);
   const geminiApiKey = useSettingsStore((state) => state.geminiApiKey);
   const geminiTextModel = useSettingsStore((state) => state.geminiTextModel);
   const geminiImageModel = useSettingsStore((state) => state.geminiImageModel);
@@ -149,9 +348,17 @@ export const SettingsPage = () => {
   const falTextModel = useSettingsStore((state) => state.falTextModel);
   const falImageModel = useSettingsStore((state) => state.falImageModel);
   const falVideoModel = useSettingsStore((state) => state.falVideoModel);
+  const falAudioModel = useSettingsStore((state) => state.falAudioModel);
+  const elevenLabsApiKey = useSettingsStore((state) => state.elevenLabsApiKey);
+  const elevenLabsDefaultVoiceId = useSettingsStore(
+    (state) => state.elevenLabsDefaultVoiceId,
+  );
+  const elevenLabsTtsModel = useSettingsStore((state) => state.elevenLabsTtsModel);
+  const meshyApiKey = useSettingsStore((state) => state.meshyApiKey);
   const setTextProvider = useSettingsStore((state) => state.setTextProvider);
   const setImageProvider = useSettingsStore((state) => state.setImageProvider);
   const setVideoProvider = useSettingsStore((state) => state.setVideoProvider);
+  const setAudioProvider = useSettingsStore((state) => state.setAudioProvider);
   const setGeminiApiKey = useSettingsStore((state) => state.setGeminiApiKey);
   const setGeminiTextModel = useSettingsStore((state) => state.setGeminiTextModel);
   const setGeminiImageModel = useSettingsStore((state) => state.setGeminiImageModel);
@@ -160,6 +367,15 @@ export const SettingsPage = () => {
   const setFalTextModel = useSettingsStore((state) => state.setFalTextModel);
   const setFalImageModel = useSettingsStore((state) => state.setFalImageModel);
   const setFalVideoModel = useSettingsStore((state) => state.setFalVideoModel);
+  const setFalAudioModel = useSettingsStore((state) => state.setFalAudioModel);
+  const setElevenLabsApiKey = useSettingsStore((state) => state.setElevenLabsApiKey);
+  const setElevenLabsDefaultVoiceId = useSettingsStore(
+    (state) => state.setElevenLabsDefaultVoiceId,
+  );
+  const setElevenLabsTtsModel = useSettingsStore(
+    (state) => state.setElevenLabsTtsModel,
+  );
+  const setMeshyApiKey = useSettingsStore((state) => state.setMeshyApiKey);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -209,20 +425,30 @@ export const SettingsPage = () => {
             <ProviderRow
               label={settingsCopy.providers.text.label}
               hint={settingsCopy.providers.text.hint}
+              options={PROVIDER_OPTIONS}
               value={textProvider}
               onChange={setTextProvider}
             />
             <ProviderRow
               label={settingsCopy.providers.image.label}
               hint={settingsCopy.providers.image.hint}
+              options={PROVIDER_OPTIONS}
               value={imageProvider}
               onChange={setImageProvider}
             />
             <ProviderRow
               label={settingsCopy.providers.video.label}
               hint={settingsCopy.providers.video.hint}
+              options={PROVIDER_OPTIONS}
               value={videoProvider}
               onChange={setVideoProvider}
+            />
+            <ProviderRow
+              label={settingsCopy.providers.audio.label}
+              hint={settingsCopy.providers.audio.hint}
+              options={AUDIO_PROVIDER_OPTIONS}
+              value={audioProvider}
+              onChange={setAudioProvider}
             />
           </div>
           <p className="mt-4 text-xs text-fg-muted">{settingsCopy.gemini.note}</p>
@@ -239,55 +465,35 @@ export const SettingsPage = () => {
             {settingsCopy.gemini.heading}
           </h2>
           <div className="mt-5 flex flex-col gap-5">
-            <Field
+            <VerifiedKeyField
               label={settingsCopy.gemini.keyLabel}
               helper={settingsCopy.gemini.keyHelper}
-            >
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  type="password"
-                  autoComplete="off"
-                  placeholder={settingsCopy.gemini.keyPlaceholder}
-                  value={geminiApiKey}
-                  onChange={(event) => setGeminiApiKey(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field label={settingsCopy.gemini.textModelLabel}>
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  className="font-mono text-[13px]"
-                  value={geminiTextModel}
-                  onChange={(event) => setGeminiTextModel(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field label={settingsCopy.gemini.imageModelLabel}>
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  className="font-mono text-[13px]"
-                  value={geminiImageModel}
-                  onChange={(event) => setGeminiImageModel(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field label={settingsCopy.gemini.videoModelLabel}>
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  className="font-mono text-[13px]"
-                  value={geminiVideoModel}
-                  onChange={(event) => setGeminiVideoModel(event.target.value)}
-                />
-              )}
-            </Field>
+              placeholder={settingsCopy.gemini.keyPlaceholder}
+              value={geminiApiKey}
+              onChange={setGeminiApiKey}
+              inputTestId="settings-gemini-key"
+              verifyTestId="verify-gemini"
+              verify={verifyGeminiKey}
+            />
+            <ModelField
+              label={settingsCopy.gemini.textModelLabel}
+              value={geminiTextModel}
+              onChange={setGeminiTextModel}
+            />
+            <ModelField
+              label={settingsCopy.gemini.imageModelLabel}
+              value={geminiImageModel}
+              onChange={setGeminiImageModel}
+              models={modelsFor("gemini", "image")}
+              listId="settings-models-gemini-image"
+            />
+            <ModelField
+              label={settingsCopy.gemini.videoModelLabel}
+              value={geminiVideoModel}
+              onChange={setGeminiVideoModel}
+              models={modelsFor("gemini", "video")}
+              listId="settings-models-gemini-video"
+            />
           </div>
         </section>
 
@@ -302,64 +508,120 @@ export const SettingsPage = () => {
             {settingsCopy.fal.heading}
           </h2>
           <div className="mt-5 flex flex-col gap-5">
-            <Field
+            <VerifiedKeyField
               label={settingsCopy.fal.keyLabel}
               helper={settingsCopy.fal.keyHelper}
-            >
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  type="password"
-                  autoComplete="off"
-                  placeholder={settingsCopy.fal.keyPlaceholder}
-                  value={falApiKey}
-                  onChange={(event) => setFalApiKey(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field
+              placeholder={settingsCopy.fal.keyPlaceholder}
+              value={falApiKey}
+              onChange={setFalApiKey}
+              inputTestId="settings-fal-key"
+              verifyTestId="verify-fal"
+              verify={verifyFalKey}
+            />
+            <ModelField
               label={settingsCopy.fal.textModelLabel}
               helper={settingsCopy.fal.textModelHelper}
-            >
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  className="font-mono text-[13px]"
-                  value={falTextModel}
-                  onChange={(event) => setFalTextModel(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field
+              value={falTextModel}
+              onChange={setFalTextModel}
+            />
+            <ModelField
               label={settingsCopy.fal.imageModelLabel}
-              helper={settingsCopy.fal.imageModelHelper}
-            >
-              {({ inputId, describedBy }) => (
-                <TextInput
-                  id={inputId}
-                  aria-describedby={describedBy}
-                  className="font-mono text-[13px]"
-                  value={falImageModel}
-                  onChange={(event) => setFalImageModel(event.target.value)}
-                />
-              )}
-            </Field>
-            <Field
+              value={falImageModel}
+              onChange={setFalImageModel}
+              models={modelsFor("fal", "image")}
+              listId="settings-models-fal-image"
+            />
+            <ModelField
               label={settingsCopy.fal.videoModelLabel}
-              helper={settingsCopy.fal.videoModelHelper}
+              value={falVideoModel}
+              onChange={setFalVideoModel}
+              models={modelsFor("fal", "video")}
+              listId="settings-models-fal-video"
+            />
+            <ModelField
+              label={settingsCopy.fal.audioModelLabel}
+              helper={settingsCopy.fal.audioModelHelper}
+              value={falAudioModel}
+              onChange={setFalAudioModel}
+              models={modelsFor("fal", "audio")}
+              listId="settings-models-fal-audio"
+            />
+          </div>
+        </section>
+
+        <section
+          aria-labelledby="settings-elevenlabs"
+          className="mt-6 border-t border-line pt-6"
+        >
+          <h2
+            id="settings-elevenlabs"
+            className="font-display text-lg font-bold tracking-[-0.02em]"
+          >
+            {settingsCopy.elevenlabs.heading}
+          </h2>
+          <div className="mt-5 flex flex-col gap-5">
+            <VerifiedKeyField
+              label={settingsCopy.elevenlabs.keyLabel}
+              helper={settingsCopy.elevenlabs.keyHelper}
+              placeholder={settingsCopy.elevenlabs.keyPlaceholder}
+              value={elevenLabsApiKey}
+              onChange={setElevenLabsApiKey}
+              inputTestId="settings-elevenlabs-key"
+              verifyTestId="verify-elevenlabs"
+              verify={verifyElevenLabsKey}
+            />
+            <Field
+              label={settingsCopy.elevenlabs.voiceLabel}
+              helper={settingsCopy.elevenlabs.voiceHelper}
             >
               {({ inputId, describedBy }) => (
                 <TextInput
                   id={inputId}
                   aria-describedby={describedBy}
                   className="font-mono text-[13px]"
-                  value={falVideoModel}
-                  onChange={(event) => setFalVideoModel(event.target.value)}
+                  value={elevenLabsDefaultVoiceId}
+                  onChange={(event) =>
+                    setElevenLabsDefaultVoiceId(event.target.value)
+                  }
                 />
               )}
             </Field>
+            <ModelField
+              label={settingsCopy.elevenlabs.ttsModelLabel}
+              helper={settingsCopy.elevenlabs.ttsModelHelper}
+              value={elevenLabsTtsModel}
+              onChange={setElevenLabsTtsModel}
+            />
+          </div>
+        </section>
+
+        <section
+          aria-labelledby="settings-meshy"
+          className="mt-6 border-t border-line pt-6"
+        >
+          <h2
+            id="settings-meshy"
+            className="font-display text-lg font-bold tracking-[-0.02em]"
+          >
+            {settingsCopy.meshy.heading}
+          </h2>
+          <p className="mt-1 text-[13px] text-fg-muted">
+            {settingsCopy.meshy.intro}
+          </p>
+          <div className="mt-5 flex flex-col gap-5">
+            <VerifiedKeyField
+              label={settingsCopy.meshy.keyLabel}
+              helper={settingsCopy.meshy.keyHelper}
+              placeholder={settingsCopy.meshy.keyPlaceholder}
+              value={meshyApiKey}
+              onChange={setMeshyApiKey}
+              inputTestId="settings-meshy-key"
+              verifyTestId="verify-meshy"
+              verify={() => verifyMeshyKey()}
+            />
+            <p className="text-xs text-fg-muted">
+              {settingsCopy.meshy.testKeyNote}
+            </p>
           </div>
         </section>
 
