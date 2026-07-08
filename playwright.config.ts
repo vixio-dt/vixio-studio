@@ -4,8 +4,13 @@ export default defineConfig({
   testDir: "e2e",
   timeout: 60_000,
   fullyParallel: true,
+  // Two workers: the heavy specs (WebCodecs final render, previz capture,
+  // real-time animatic recording) are CPU bound and flake when they contend
+  // for the container's four cores.
+  workers: 2,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
+  expect: { timeout: 10_000 },
   use: {
     baseURL: "http://127.0.0.1:5180",
     trace: "retain-on-failure",
