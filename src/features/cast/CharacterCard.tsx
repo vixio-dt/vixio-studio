@@ -1,5 +1,5 @@
-import { DiceFive, Trash } from "@phosphor-icons/react";
-import { useState } from "react";
+import { DiceFive, SpeakerSimpleHigh, Trash } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -17,6 +17,7 @@ import type {
   Project,
 } from "@/domain/types";
 import { randomSeed } from "@/lib/random";
+import { resolveAudioProvider } from "@/providers/registry";
 import { useProjectsStore } from "@/stores/projects";
 import { useTasksStore } from "@/stores/tasks";
 
@@ -32,9 +33,15 @@ const ROLE_OPTIONS: readonly { value: CharacterRole; label: string }[] = [
 type CharacterCardProps = {
   project: Project;
   character: Character;
+  /** Position in the cast grid; suffixes the voice testids. */
+  index: number;
 };
 
-export const CharacterCard = ({ project, character }: CharacterCardProps) => {
+export const CharacterCard = ({
+  project,
+  character,
+  index,
+}: CharacterCardProps) => {
   const updateCharacter = useProjectsStore((state) => state.updateCharacter);
   const deleteCharacter = useProjectsStore((state) => state.deleteCharacter);
   const attachPortraitToCharacter = useProjectsStore(
@@ -168,6 +175,8 @@ export const CharacterCard = ({ project, character }: CharacterCardProps) => {
         )}
       </Field>
 
+      <VoiceSection character={character} index={index} />
+
       <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
         <Button
           variant="primary"
@@ -223,6 +232,133 @@ export const CharacterCard = ({ project, character }: CharacterCardProps) => {
         </div>
       </Dialog>
     </article>
+  );
+};
+
+/** The bio's first sentence; the voice test reads this line aloud. */
+const firstSentence = (text: string): string | null => {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  const match = /^[^.!?]*[.!?]?/.exec(trimmed);
+  const sentence = (match?.[0] ?? trimmed).trim();
+  return sentence.length > 0 ? sentence : null;
+};
+
+type VoiceTestState =
+  | { phase: "idle" }
+  | { phase: "running" }
+  | { phase: "failed"; message: string };
+
+type VoiceSectionProps = {
+  character: Character;
+  index: number;
+};
+
+/**
+ * Voice casting: a display name plus the provider voice id used for every
+ * generated dialogue line. The test button calls the audio seam directly
+ * (no queue) and plays the synthesized first sentence of the bio.
+ */
+const VoiceSection = ({ character, index }: VoiceSectionProps) => {
+  const updateCharacter = useProjectsStore((state) => state.updateCharacter);
+  const [testState, setTestState] = useState<VoiceTestState>({ phase: "idle" });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Stop any preview playback when the card unmounts.
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    },
+    [],
+  );
+
+  const displayName = character.name.trim() || castCopy.unnamed;
+
+  const handleTest = async () => {
+    setTestState({ phase: "running" });
+    const text =
+      firstSentence(character.bio) ?? castCopy.voiceTestLine(displayName);
+    const voiceId = character.voiceId?.trim();
+    const result = await resolveAudioProvider().generateSpeech(
+      {
+        text,
+        ...(voiceId ? { voiceId } : {}),
+        characterName: displayName,
+      },
+      () => undefined,
+    );
+    if (!result.ok) {
+      setTestState({ phase: "failed", message: result.error.message });
+      return;
+    }
+    audioRef.current?.pause();
+    const url = URL.createObjectURL(result.value.blob);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    const release = () => URL.revokeObjectURL(url);
+    audio.onended = release;
+    audio.onerror = release;
+    try {
+      await audio.play();
+      setTestState({ phase: "idle" });
+    } catch (cause) {
+      release();
+      setTestState({
+        phase: "failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-line pt-3">
+      <Field label={castCopy.voiceNameLabel}>
+        {({ inputId, describedBy }) => (
+          <TextInput
+            id={inputId}
+            aria-describedby={describedBy}
+            value={character.voiceName ?? ""}
+            onChange={(event) =>
+              updateCharacter(character.id, { voiceName: event.target.value })
+            }
+            placeholder={castCopy.voiceNamePlaceholder}
+          />
+        )}
+      </Field>
+
+      <Field
+        label={castCopy.voiceIdLabel}
+        helper={castCopy.voiceIdHelper}
+        error={testState.phase === "failed" ? castCopy.voiceTestFailed + " " + testState.message : undefined}
+      >
+        {({ inputId, describedBy }) => (
+          <div className="flex items-center gap-2">
+            <TextInput
+              id={inputId}
+              aria-describedby={describedBy}
+              data-testid={`cast-voice-id-${index}`}
+              value={character.voiceId ?? ""}
+              onChange={(event) =>
+                updateCharacter(character.id, { voiceId: event.target.value })
+              }
+              placeholder={castCopy.voiceIdPlaceholder}
+              className="font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="cast-voice-test"
+              busy={testState.phase === "running"}
+              onClick={() => void handleTest()}
+            >
+              <SpeakerSimpleHigh size={14} aria-hidden />
+              {castCopy.testVoice}
+            </Button>
+          </div>
+        )}
+      </Field>
+    </div>
   );
 };
 

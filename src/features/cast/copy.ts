@@ -40,6 +40,17 @@ export const castCopy = {
   seedLabel: "Seed",
   newSeed: "New seed",
 
+  voiceNameLabel: "Voice name",
+  voiceNamePlaceholder: "Warm narrator",
+  voiceIdLabel: "Voice id",
+  voiceIdHelper:
+    "Paste an ElevenLabs voice id. Preview mode ignores it and synthesizes offline.",
+  voiceIdPlaceholder: "Voice id",
+  testVoice: "Test voice",
+  voiceTestFailed: "Voice test failed.",
+  voiceTestLine: (name: string): string =>
+    `${name} clears their throat and counts to three.`,
+
   historyLabel: "Portrait history",
   usePortrait: "Use this portrait",
 

@@ -75,6 +75,24 @@ export const buildCutEntries = (
 export const totalSeconds = (entries: readonly CutEntry[]): number =>
   entries.reduce((sum, entry) => sum + entry.seconds, 0);
 
+/**
+ * Stage start offset of each entry in seconds, using playback lengths (slates
+ * run their fixed stage time). Drives the audio mix schedule.
+ */
+export const playbackOffsets = (entries: readonly CutEntry[]): number[] => {
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (const entry of entries) {
+    offsets.push(cursor);
+    cursor += entry.playbackSeconds;
+  }
+  return offsets;
+};
+
+/** Total stage time of the cut in seconds; the audio mix loops up to here. */
+export const playbackTotalSeconds = (entries: readonly CutEntry[]): number =>
+  entries.reduce((sum, entry) => sum + entry.playbackSeconds, 0);
+
 export const elapsedSeconds = (
   entries: readonly CutEntry[],
   currentIndex: number,

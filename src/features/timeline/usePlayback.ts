@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type Playback = {
   index: number;
@@ -10,14 +10,182 @@ export type Playback = {
   seek: (index: number) => void;
 };
 
+/** A dialogue clip pinned to its shot's start offset on the cut timeline. */
+export type MixCue = {
+  /** Object URL of the dialogue asset. */
+  url: string;
+  /** Start offset from the top of the cut, in seconds. */
+  at: number;
+};
+
+/** A music or ambience bed looped for the whole cut. */
+export type MixLoop = {
+  id: string;
+  /** Object URL of the track asset. */
+  url: string;
+  /** 0..1 playback gain. */
+  gain: number;
+  muted: boolean;
+};
+
+export type PlaybackMix = {
+  cues: readonly MixCue[];
+  loops: readonly MixLoop[];
+  /** Stage start offset of each entry, aligned with `timings`. */
+  offsets: readonly number[];
+  /** Total stage time of the cut in seconds. */
+  totalSeconds: number;
+};
+
+const EMPTY_MIX: PlaybackMix = {
+  cues: [],
+  loops: [],
+  offsets: [],
+  totalSeconds: 0,
+};
+
+/**
+ * Live WebAudio graph for the preview mix. Sources are throwaway; buffers are
+ * cached per url so a rebuild is just node wiring. The visual clock stays the
+ * master: every entry change reschedules the graph from that entry's offset,
+ * so audio resynchronizes to the stage at each cut.
+ */
+type AudioEngine = {
+  context: AudioContext | null;
+  nodes: AudioScheduledSourceNode[];
+  loopGains: Map<string, GainNode>;
+  buffers: Map<string, Promise<AudioBuffer>>;
+  /** Bumped to invalidate in-flight async schedules. */
+  generation: number;
+};
+
+const createEngine = (): AudioEngine => ({
+  context: null,
+  nodes: [],
+  loopGains: new Map(),
+  buffers: new Map(),
+  generation: 0,
+});
+
+const stopEngineNodes = (engine: AudioEngine): void => {
+  engine.generation += 1;
+  for (const node of engine.nodes) {
+    try {
+      node.stop();
+    } catch {
+      // Nodes that never started throw; nothing to stop.
+    }
+    node.disconnect();
+  }
+  engine.nodes = [];
+  for (const gain of engine.loopGains.values()) gain.disconnect();
+  engine.loopGains.clear();
+};
+
+const loadBuffer = (
+  engine: AudioEngine,
+  context: AudioContext,
+  url: string,
+): Promise<AudioBuffer> => {
+  const cached = engine.buffers.get(url);
+  if (cached) return cached;
+  const pending = fetch(url)
+    .then((response) => response.arrayBuffer())
+    .then((data) => context.decodeAudioData(data));
+  engine.buffers.set(url, pending);
+  pending.catch(() => engine.buffers.delete(url));
+  return pending;
+};
+
+/**
+ * Builds and starts the graph for a playhead position. Buffers may need a
+ * decode first; the schedule compensates with the elapsed context time so
+ * cues stay pinned to where the visual clock already is.
+ */
+const scheduleMix = async (
+  engine: AudioEngine,
+  mix: PlaybackMix,
+  offsetSeconds: number,
+): Promise<void> => {
+  if (mix.totalSeconds <= 0) return;
+  if (mix.cues.length === 0 && mix.loops.length === 0) return;
+  engine.context ??= new AudioContext();
+  const context = engine.context;
+  if (context.state === "suspended") {
+    await context.resume().catch(() => undefined);
+  }
+
+  stopEngineNodes(engine);
+  const generation = engine.generation;
+  const anchor = context.currentTime;
+
+  const urls = new Set<string>();
+  for (const cue of mix.cues) urls.add(cue.url);
+  for (const loop of mix.loops) urls.add(loop.url);
+  const decoded = new Map<string, AudioBuffer>();
+  await Promise.all(
+    [...urls].map(async (url) => {
+      try {
+        decoded.set(url, await loadBuffer(engine, context, url));
+      } catch {
+        // An undecodable asset just stays silent.
+      }
+    }),
+  );
+  if (engine.generation !== generation) return;
+
+  const now = context.currentTime;
+  const playhead = offsetSeconds + (now - anchor);
+  const remaining = mix.totalSeconds - playhead;
+  if (remaining <= 0) return;
+
+  for (const cue of mix.cues) {
+    const buffer = decoded.get(cue.url);
+    if (!buffer) continue;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    const lead = cue.at - playhead;
+    if (lead >= 0) {
+      source.start(now + lead);
+    } else if (cue.at + buffer.duration > playhead) {
+      source.start(now, playhead - cue.at);
+    } else {
+      continue;
+    }
+    engine.nodes.push(source);
+  }
+
+  for (const loop of mix.loops) {
+    const buffer = decoded.get(loop.url);
+    if (!buffer || buffer.duration <= 0) continue;
+    const gainNode = context.createGain();
+    gainNode.gain.value = loop.muted ? 0 : loop.gain;
+    gainNode.connect(context.destination);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(gainNode);
+    source.start(now, playhead % buffer.duration);
+    source.stop(now + remaining);
+    engine.nodes.push(source);
+    engine.loopGains.set(loop.id, gainNode);
+  }
+};
+
 /**
  * Drives the cut: which entry is on the stage and whether time advances.
  * `timings[i]` is the entry's playback length in seconds, or null when the
  * entry advances itself (video clips fire onEnded). The advance timer clears
  * on pause, seek, data changes, and unmount.
+ *
+ * While playing, the mix runs through WebAudio: dialogue cues at their shot
+ * offsets, music and ambience looped for the whole cut behind GainNodes.
+ * Gain and mute changes apply live; structural changes rebuild the graph.
  */
 export const usePlayback = (
   timings: readonly (number | null)[],
+  mix: PlaybackMix = EMPTY_MIX,
 ): Playback => {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -32,6 +200,23 @@ export const usePlayback = (
   useEffect(() => {
     indexRef.current = safeIndex;
   }, [safeIndex]);
+
+  const engineRef = useRef<AudioEngine | null>(null);
+  const mixRef = useRef(mix);
+  useEffect(() => {
+    mixRef.current = mix;
+  }, [mix]);
+
+  // Rebuild only when the graph's shape changes; gain and mute apply live.
+  const mixShapeKey = useMemo(
+    () =>
+      JSON.stringify({
+        cues: mix.cues.map((cue) => [cue.url, cue.at]),
+        loops: mix.loops.map((loop) => loop.url),
+        total: mix.totalSeconds,
+      }),
+    [mix],
+  );
 
   const play = useCallback(() => {
     if (count > 0) setPlaying(true);
@@ -72,6 +257,44 @@ export const usePlayback = (
     );
     return () => window.clearTimeout(timer);
   }, [activePlaying, safeIndex, timings, next]);
+
+  // Audio schedule: rebuilt at play, at every entry change (which resyncs the
+  // mix to the visual clock), and when the mix shape changes; torn down on
+  // pause and when the cut ends.
+  useEffect(() => {
+    if (!activePlaying) {
+      if (engineRef.current) stopEngineNodes(engineRef.current);
+      return;
+    }
+    engineRef.current ??= createEngine();
+    const engine = engineRef.current;
+    const current = mixRef.current;
+    const offset = current.offsets[indexRef.current] ?? 0;
+    void scheduleMix(engine, current, offset);
+    return () => stopEngineNodes(engine);
+  }, [activePlaying, safeIndex, mixShapeKey]);
+
+  // Live gain and mute updates on the running graph.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    for (const loop of mix.loops) {
+      const gainNode = engine.loopGains.get(loop.id);
+      if (gainNode) gainNode.gain.value = loop.muted ? 0 : loop.gain;
+    }
+  }, [mix]);
+
+  // Release the context with the component.
+  useEffect(
+    () => () => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      stopEngineNodes(engine);
+      void engine.context?.close().catch(() => undefined);
+      engineRef.current = null;
+    },
+    [],
+  );
 
   return {
     index: safeIndex,

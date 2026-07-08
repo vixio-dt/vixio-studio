@@ -72,11 +72,12 @@ export const CastPage = () => {
         ) : (
           /* Collapses to one column below 768px, then 2, 3, 4 columns up. */
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {characters.map((character) => (
+            {characters.map((character, index) => (
               <CharacterCard
                 key={character.id}
                 project={project}
                 character={character}
+                index={index}
               />
             ))}
           </div>

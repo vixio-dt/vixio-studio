@@ -15,6 +15,7 @@ import { useActiveProject } from "@/features/shared/useActiveProject";
 import { formatSeconds } from "@/lib/time";
 import { useAssetsStore } from "@/stores/assets";
 import {
+  selectAudioTracksForProject,
   selectCharactersForProject,
   selectScenesForProject,
   selectShotsForProject,
@@ -22,10 +23,13 @@ import {
   useProjectsStore,
 } from "@/stores/projects";
 
+import { AudioLanes } from "./AudioLanes";
 import { timelineCopy } from "./copy";
 import {
   buildCutEntries,
   elapsedSeconds,
+  playbackOffsets,
+  playbackTotalSeconds,
   totalSeconds,
 } from "./cutLogic";
 import {
@@ -35,7 +39,8 @@ import {
 } from "./exporters";
 import { Filmstrip } from "./Filmstrip";
 import { PlaybackStage } from "./PlaybackStage";
-import { usePlayback } from "./usePlayback";
+import { RenderPanel } from "./RenderPanel";
+import { usePlayback, type PlaybackMix } from "./usePlayback";
 
 /**
  * The cut: every shot in global script order, hard cuts at scene bounds.
@@ -48,6 +53,7 @@ export const TimelinePage = () => {
   const scenesById = useProjectsStore((state) => state.scenes);
   const shotsById = useProjectsStore((state) => state.shots);
   const charactersById = useProjectsStore((state) => state.characters);
+  const audioTracksById = useProjectsStore((state) => state.audioTracks);
   const assets = useAssetsStore((state) => state.assets);
   const hydrated = useAssetsStore((state) => state.hydrated);
 
@@ -76,6 +82,12 @@ export const TimelinePage = () => {
     [scenes, shotsById],
   );
 
+  const tracks = useMemo(
+    () =>
+      project ? selectAudioTracksForProject(audioTracksById, project.id) : [],
+    [audioTracksById, project],
+  );
+
   const entries = useMemo(
     () => buildCutEntries(shots, scenesById, assets),
     [shots, scenesById, assets],
@@ -92,7 +104,34 @@ export const TimelinePage = () => {
     [entries],
   );
 
-  const playback = usePlayback(timings);
+  // Preview mix: dialogue clips at their shot offsets, music and ambience
+  // looped behind the whole cut. Playback schedules it through WebAudio.
+  const mix = useMemo((): PlaybackMix => {
+    const offsets = playbackOffsets(entries);
+    const cues = entries.flatMap((entry, position) => {
+      const asset = entry.shot.dialogueAssetId
+        ? assets[entry.shot.dialogueAssetId]
+        : undefined;
+      const at = offsets[position];
+      return asset && asset.url.length > 0 && at !== undefined
+        ? [{ url: asset.url, at }]
+        : [];
+    });
+    const loops = tracks.flatMap((track) => {
+      const asset = track.assetId ? assets[track.assetId] : undefined;
+      return asset && asset.url.length > 0
+        ? [{ id: track.id, url: asset.url, gain: track.gain, muted: track.muted }]
+        : [];
+    });
+    return {
+      cues,
+      loops,
+      offsets,
+      totalSeconds: playbackTotalSeconds(entries),
+    };
+  }, [entries, tracks, assets]);
+
+  const playback = usePlayback(timings, mix);
   const [muted, setMuted] = useState(true);
   const [exportingBoard, setExportingBoard] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -256,6 +295,21 @@ export const TimelinePage = () => {
           entries={entries}
           currentIndex={playback.index}
           onSeek={playback.seek}
+        />
+
+        <AudioLanes
+          project={project}
+          entries={entries}
+          tracks={tracks}
+          totalSeconds={mix.totalSeconds}
+        />
+
+        <RenderPanel
+          project={project}
+          scenes={scenes}
+          shots={shots}
+          assets={assets}
+          tracks={tracks}
         />
       </div>
     </div>
