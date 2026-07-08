@@ -40,8 +40,6 @@ export const previzCopy = {
     nothingSelected: "Click a mannequin or prop in the viewport to select it.",
     rotationLabel: "Rotation",
     removeProp: "Remove prop",
-    mannequinName: (name: string) => name,
-    propName: (kind: string) => kind,
   },
   camera: {
     title: "Camera",

@@ -84,13 +84,14 @@ export const ShotWorkspace = ({
 
   const depthUrlRef = useRef<string | null>(null);
   const aliveRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // StrictMode runs this cleanup once on mount, so re-arm on setup.
+    aliveRef.current = true;
+    return () => {
       aliveRef.current = false;
       if (depthUrlRef.current) URL.revokeObjectURL(depthUrlRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   /** All blockout edits flow through here: update state, persist, report. */
   const mutate = useCallback(
