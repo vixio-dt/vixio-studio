@@ -241,6 +241,41 @@ export const usePlayback = (
     [mix],
   );
 
+  /* ------------------------------------------------------------------ */
+  /* Elapsed clock: a smooth, moving playhead                            */
+  /* ------------------------------------------------------------------ */
+
+  // Stage length of an entry, derived from the offsets the mix already
+  // carries (offsets[i+1] - offsets[i], or the remainder to the total for
+  // the last entry). Read from the ref so callers never need to depend on
+  // the mix object's identity.
+  const stageSecondsFor = useCallback((entryIndex: number): number => {
+    const current = mixRef.current;
+    const start = current.offsets[entryIndex] ?? 0;
+    const nextStart = current.offsets[entryIndex + 1];
+    return nextStart !== undefined
+      ? Math.max(0, nextStart - start)
+      : Math.max(0, current.totalSeconds - start);
+  }, []);
+
+  const [entryElapsed, setEntryElapsed] = useState(0);
+  // Mirrors `entryElapsed` for the running rAF loop to read without
+  // depending on the state value (which would restart the effect below on
+  // every tick).
+  const entryElapsedRef = useRef(0);
+  const clockRef = useRef({ startedAt: 0, base: 0 });
+  const rafRef = useRef<number | null>(null);
+
+  // A new entry always starts its within-entry clock at zero, whether it was
+  // reached by auto-advance or by a seek. Called from the index-changing
+  // actions below (never during render, never as a bare effect body), so it
+  // also re-anchors a rAF loop that is already running across the cut.
+  const resetClock = useCallback(() => {
+    entryElapsedRef.current = 0;
+    clockRef.current = { startedAt: performance.now(), base: 0 };
+    setEntryElapsed(0);
+  }, []);
+
   const play = useCallback(() => {
     if (count > 0) setPlaying(true);
   }, [count]);
@@ -252,21 +287,24 @@ export const usePlayback = (
   const next = useCallback(() => {
     if (indexRef.current < count - 1) {
       setIndex(indexRef.current + 1);
+      resetClock();
     } else {
       // Reached the end of the cut: stop on the last shot.
       setPlaying(false);
     }
-  }, [count]);
+  }, [count, resetClock]);
 
   const prev = useCallback(() => {
     setIndex(Math.max(0, indexRef.current - 1));
-  }, []);
+    resetClock();
+  }, [resetClock]);
 
   const seek = useCallback(
     (target: number) => {
       setIndex(Math.max(0, Math.min(count - 1, target)));
+      resetClock();
     },
-    [count],
+    [count, resetClock],
   );
 
   // Advance timer for self-timed entries (stills and slates).
@@ -322,41 +360,11 @@ export const usePlayback = (
     [],
   );
 
-  /* ------------------------------------------------------------------ */
-  /* Elapsed clock: a smooth, moving playhead                            */
-  /* ------------------------------------------------------------------ */
-
-  // Stage length of an entry, derived from the offsets the mix already
-  // carries (offsets[i+1] - offsets[i], or the remainder to the total for
-  // the last entry). Read from the ref so the rAF loop below never needs to
-  // restart just because the mix object identity changed.
-  const stageSecondsFor = useCallback((entryIndex: number): number => {
-    const current = mixRef.current;
-    const start = current.offsets[entryIndex] ?? 0;
-    const next = current.offsets[entryIndex + 1];
-    return next !== undefined
-      ? Math.max(0, next - start)
-      : Math.max(0, current.totalSeconds - start);
-  }, []);
-
-  const [entryElapsed, setEntryElapsed] = useState(0);
-  const entryElapsedRef = useRef(0);
-  const clockRef = useRef({ startedAt: 0, base: 0 });
-  const rafRef = useRef<number | null>(null);
-  const lastClockIndexRef = useRef(safeIndex);
-
-  // A new entry always starts its within-entry clock at zero, whether it was
-  // reached by auto-advance or by a seek. Adjusted during render (not in an
-  // effect) so the reset lands in the same commit as the index change.
-  if (lastClockIndexRef.current !== safeIndex) {
-    lastClockIndexRef.current = safeIndex;
-    entryElapsedRef.current = 0;
-    setEntryElapsed(0);
-  }
-
-  // Smoothly advance the within-entry clock while playing; freeze it on
-  // pause. On an index change this effect also re-runs, picking up the
-  // fresh zero baseline set above during render.
+  // Smoothly advances the within-entry clock while playing; freezes it on
+  // pause. Anchored purely on `activePlaying`: an index change re-anchors
+  // the clock itself (via `resetClock` above, called from the actions that
+  // change it), so a rAF loop that is already running across many entries
+  // during continuous playback never needs to restart.
   useEffect(() => {
     if (!activePlaying) {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -379,7 +387,7 @@ export const usePlayback = (
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [activePlaying, safeIndex, stageSecondsFor]);
+  }, [activePlaying, stageSecondsFor]);
 
   const elapsedSeconds = Math.min(
     mix.totalSeconds,
