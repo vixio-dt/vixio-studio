@@ -35,6 +35,8 @@ export type Project = {
   readingDirection?: ReadingDirection;
   aspectRatio: AspectRatio;
   coverAssetId: AssetId | null;
+  /** Master level for the dialogue lane in playback and render; 0..1, defaults to 1 when unset. */
+  dialogueGain?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -239,6 +241,8 @@ export type Balloon = {
   width: number;
   /** Degrees; where the tail points, for speech and thought balloons. */
   tailAngle?: number;
+  /** Multiplier on the base lettering size; 0.5..2, defaults to 1 when unset. */
+  fontScale?: number;
 };
 
 export type Panel = {
