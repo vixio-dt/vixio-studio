@@ -71,6 +71,7 @@ export const geminiRequest = async (
   path: string,
   apiKey: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<Result<unknown>> => {
   let response: Response;
   try {
@@ -81,6 +82,7 @@ export const geminiRequest = async (
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch (cause) {
     return err(

@@ -1,4 +1,4 @@
-import { MediaFrame, Skeleton } from "@/components/ui";
+import { Badge, MediaFrame, Skeleton } from "@/components/ui";
 import { findComicLayout } from "@/domain/constants";
 import type { ComicPage, Panel, ReadingDirection } from "@/domain/types";
 import type { PanelId } from "@/lib/id";
@@ -60,6 +60,7 @@ export const PanelRail = ({
                 panel={panel}
                 aspect={frameAspectString(layout, panel.index)}
                 number={displayNumberForPanel(layout, direction, panel.index)}
+                unplaced={panel.index >= layout.frames.length}
                 testId={`panel-item-${pageIndex}-${displayPosition}`}
                 selected={panel.id === selectedPanelId}
                 onSelect={() => onSelect(panel.id)}
@@ -77,6 +78,8 @@ type PanelRowProps = {
   aspect: string;
   /** 1-based display number in reading order. */
   number: number;
+  /** True when the panel's index falls outside the page's current layout. */
+  unplaced: boolean;
   testId: string;
   selected: boolean;
   onSelect: () => void;
@@ -86,6 +89,7 @@ const PanelRow = ({
   panel,
   aspect,
   number,
+  unplaced,
   testId,
   selected,
   onSelect,
@@ -119,7 +123,12 @@ const PanelRow = ({
         ) : null}
       </MediaFrame>
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-mono text-[11px] text-fg-secondary">#{number}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-[11px] text-fg-secondary">#{number}</span>
+          {unplaced ? (
+            <Badge tone="neutral">{panelLabCopy.rail.unplaced}</Badge>
+          ) : null}
+        </span>
         <span
           className={`line-clamp-2 text-[13px] ${
             description.length > 0 ? "text-fg" : "text-fg-muted"
@@ -132,6 +141,11 @@ const PanelRow = ({
         {panel.balloons.length > 0 ? (
           <span className="font-mono text-[11px] text-fg-muted">
             {panelLabCopy.rail.balloonCount(panel.balloons.length)}
+          </span>
+        ) : null}
+        {unplaced ? (
+          <span className="text-[11px] text-fg-muted">
+            {panelLabCopy.rail.unplacedHint}
           </span>
         ) : null}
       </span>

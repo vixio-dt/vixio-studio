@@ -209,7 +209,7 @@ export const CharacterCard = ({
         title={castCopy.deleteCharacter}
       >
         <p className="text-sm text-fg-secondary">
-          {castCopy.deleteBody(displayName)}
+          {castCopy.deleteBody(displayName, project.mode)}
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <Button
@@ -247,6 +247,7 @@ const firstSentence = (text: string): string | null => {
 type VoiceTestState =
   | { phase: "idle" }
   | { phase: "running" }
+  | { phase: "playing" }
   | { phase: "failed"; message: string };
 
 type VoiceSectionProps = {
@@ -257,21 +258,24 @@ type VoiceSectionProps = {
 /**
  * Voice casting: a display name plus the provider voice id used for every
  * generated dialogue line. The test button calls the audio seam directly
- * (no queue) and plays the synthesized first sentence of the bio.
+ * (no queue), busies while synthesizing, then shows a playing state until
+ * the synthesized first sentence of the bio finishes.
  */
 const VoiceSection = ({ character, index }: VoiceSectionProps) => {
   const updateCharacter = useProjectsStore((state) => state.updateCharacter);
   const [testState, setTestState] = useState<VoiceTestState>({ phase: "idle" });
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const aliveRef = useRef(true);
 
   // Stop any preview playback when the card unmounts.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
       audioRef.current?.pause();
       audioRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const displayName = character.name.trim() || castCopy.unnamed;
 
@@ -288,6 +292,7 @@ const VoiceSection = ({ character, index }: VoiceSectionProps) => {
       },
       () => undefined,
     );
+    if (!aliveRef.current) return;
     if (!result.ok) {
       setTestState({ phase: "failed", message: result.error.message });
       return;
@@ -297,17 +302,27 @@ const VoiceSection = ({ character, index }: VoiceSectionProps) => {
     const audio = new Audio(url);
     audioRef.current = audio;
     const release = () => URL.revokeObjectURL(url);
-    audio.onended = release;
-    audio.onerror = release;
+    audio.onended = () => {
+      release();
+      if (aliveRef.current) setTestState({ phase: "idle" });
+    };
+    audio.onerror = () => {
+      release();
+      if (aliveRef.current) {
+        setTestState({ phase: "failed", message: castCopy.voiceTestFailed });
+      }
+    };
     try {
       await audio.play();
-      setTestState({ phase: "idle" });
+      if (aliveRef.current) setTestState({ phase: "playing" });
     } catch (cause) {
       release();
-      setTestState({
-        phase: "failed",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
+      if (aliveRef.current) {
+        setTestState({
+          phase: "failed",
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
     }
   };
 
@@ -350,10 +365,13 @@ const VoiceSection = ({ character, index }: VoiceSectionProps) => {
               size="sm"
               data-testid="cast-voice-test"
               busy={testState.phase === "running"}
+              aria-pressed={testState.phase === "playing"}
               onClick={() => void handleTest()}
             >
               <SpeakerSimpleHigh size={14} aria-hidden />
-              {castCopy.testVoice}
+              {testState.phase === "playing"
+                ? castCopy.voicePlaying
+                : castCopy.testVoice}
             </Button>
           </div>
         )}

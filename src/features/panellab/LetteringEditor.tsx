@@ -1,5 +1,10 @@
 import { Trash } from "@phosphor-icons/react";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { Button, Select, TextInput } from "@/components/ui";
 import type { Balloon, BalloonKind, Character, Panel } from "@/domain/types";
@@ -8,11 +13,13 @@ import {
   layoutBalloon,
   LETTERING_INK,
   LETTERING_PAPER,
+  spawnBalloonPosition,
 } from "@/lib/comic/balloons";
 import type { CharacterId } from "@/lib/id";
 import { useProjectsStore } from "@/stores/projects";
 
 import { panelLabCopy } from "./copy";
+import { parseDialogueFromDescription } from "./panelLogic";
 
 /**
  * Lettering mode: an SVG overlay on the panel art where balloons are dragged
@@ -38,15 +45,23 @@ const KINDS_WITH_SPEAKER: readonly BalloonKind[] = [
 
 const KINDS_WITH_TAIL: readonly BalloonKind[] = ["speech", "thought"];
 
-const defaultBalloon = (kind: BalloonKind): Balloon => ({
-  id: crypto.randomUUID(),
-  kind,
-  text: panelLabCopy.lettering.defaultText[kind],
-  x: 0.5,
-  y: kind === "caption" ? 0.14 : 0.38,
-  width: kind === "caption" ? 0.7 : kind === "sfx" ? 0.5 : 0.42,
-  ...(KINDS_WITH_TAIL.includes(kind) ? { tailAngle: 115 } : {}),
-});
+/** New balloons fan out by spawn order so a run of adds never stacks. */
+const defaultBalloon = (kind: BalloonKind, spawnIndex: number): Balloon => {
+  const position = spawnBalloonPosition(
+    0.5,
+    kind === "caption" ? 0.14 : 0.38,
+    spawnIndex,
+  );
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    text: panelLabCopy.lettering.defaultText[kind],
+    x: position.x,
+    y: position.y,
+    width: kind === "caption" ? 0.7 : kind === "sfx" ? 0.5 : 0.42,
+    ...(KINDS_WITH_TAIL.includes(kind) ? { tailAngle: 115 } : {}),
+  };
+};
 
 type DragState = {
   balloonId: string;
@@ -89,6 +104,9 @@ export const LetteringOverlay = ({
 
   const startDrag =
     (balloon: Balloon) => (event: ReactPointerEvent<SVGGElement>) => {
+    // Dragging a balloon must not kick off the browser's native text
+    // selection drag over the surrounding page.
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = pointerFractions(event);
     setDrag({
@@ -102,6 +120,7 @@ export const LetteringOverlay = ({
 
   const moveDrag = (event: ReactPointerEvent<SVGGElement>) => {
     if (!drag) return;
+    event.preventDefault();
     const pointer = pointerFractions(event);
     setDrag({
       ...drag,
@@ -127,7 +146,7 @@ export const LetteringOverlay = ({
       ref={svgRef}
       viewBox={`0 0 ${panelWidth} ${panelHeight}`}
       preserveAspectRatio="none"
-      className="absolute inset-0 h-full w-full touch-none"
+      className={`absolute inset-0 h-full w-full touch-none ${drag ? "select-none" : ""}`}
     >
       {panel.balloons.map((balloon) => {
         const live =
@@ -211,7 +230,7 @@ export const LetteringControls = ({ panel, characters }: LetteringControlsProps)
   const setBalloons = (balloons: Balloon[]) => updatePanel(panel.id, { balloons });
 
   const addBalloon = (kind: BalloonKind) =>
-    setBalloons([...panel.balloons, defaultBalloon(kind)]);
+    setBalloons([...panel.balloons, defaultBalloon(kind, panel.balloons.length)]);
 
   const patchBalloon = (id: string, patch: Partial<Omit<Balloon, "id">>) =>
     setBalloons(
@@ -222,6 +241,37 @@ export const LetteringControls = ({ panel, characters }: LetteringControlsProps)
 
   const removeBalloon = (id: string) =>
     setBalloons(panel.balloons.filter((balloon) => balloon.id !== id));
+
+  const existingTexts = useMemo(
+    () => new Set(panel.balloons.map((balloon) => balloon.text.trim())),
+    [panel.balloons],
+  );
+  const importableLines = useMemo(
+    () =>
+      parseDialogueFromDescription(panel.description, characters).filter(
+        (line) => !existingTexts.has(line.text),
+      ),
+    [panel.description, characters, existingTexts],
+  );
+
+  const importDialogue = () => {
+    if (importableLines.length === 0) return;
+    const created = importableLines.map((line, offset) => {
+      const spawnIndex = panel.balloons.length + offset;
+      const position = spawnBalloonPosition(0.5, 0.38, spawnIndex);
+      const balloon: Balloon = {
+        id: crypto.randomUUID(),
+        kind: "speech",
+        text: line.text,
+        x: position.x,
+        y: position.y,
+        width: 0.42,
+        tailAngle: 115,
+      };
+      return line.characterId ? { ...balloon, characterId: line.characterId } : balloon;
+    });
+    setBalloons([...panel.balloons, ...created]);
+  };
 
   return (
     <div className="flex flex-col gap-3 border border-line bg-ink-panel p-3">
@@ -242,6 +292,24 @@ export const LetteringControls = ({ panel, characters }: LetteringControlsProps)
         ))}
       </div>
       <p className="text-xs text-fg-muted">{panelLabCopy.lettering.hint}</p>
+
+      <div className="flex flex-col gap-1.5 border-t border-line pt-3">
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="import-dialogue"
+          disabled={importableLines.length === 0}
+          onClick={importDialogue}
+          className="self-start"
+        >
+          {panelLabCopy.lettering.importDialogue}
+        </Button>
+        <p className="text-xs text-fg-muted">
+          {importableLines.length > 0
+            ? panelLabCopy.lettering.importDialogueHint(importableLines.length)
+            : panelLabCopy.lettering.importDialogueEmpty}
+        </p>
+      </div>
 
       {panel.balloons.length === 0 ? (
         <p className="text-xs text-fg-muted">{panelLabCopy.lettering.none}</p>
@@ -373,6 +441,27 @@ const BalloonRow = ({
             />
           </label>
         ) : null}
+
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="flex justify-between text-[11px] text-fg-muted">
+            {panelLabCopy.lettering.fontScaleLabel}
+            <span className="font-mono">
+              {Math.round((balloon.fontScale ?? 1) * 100)}%
+            </span>
+          </span>
+          <input
+            type="range"
+            data-testid="balloon-font-scale"
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={balloon.fontScale ?? 1}
+            onChange={(event) =>
+              onPatch({ fontScale: Number(event.target.value) })
+            }
+            className="h-8 w-full accent-accent-media"
+          />
+        </label>
       </div>
     </li>
   );

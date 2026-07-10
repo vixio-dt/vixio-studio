@@ -56,7 +56,7 @@ export const PlaybackStage = ({
           key={entry.shot.id}
           src={entry.frameAsset.url}
           alt={timelineCopy.stage.frameAlt(globalNumber)}
-          durationSeconds={entry.playbackSeconds}
+          durationSeconds={entry.seconds}
           seed={entry.shot.seed}
         />
       ) : (

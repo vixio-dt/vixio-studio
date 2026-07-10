@@ -1,5 +1,5 @@
 import { FilmSlate } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, MediaFrame, Skeleton } from "@/components/ui";
 import type {
@@ -18,6 +18,7 @@ import { nowIso } from "@/lib/time";
 import { useAssetsStore } from "@/stores/assets";
 
 import { timelineCopy } from "./copy";
+import { formatShortSeconds } from "./cutLogic";
 import { slugifyTitle } from "./exporters";
 
 const renderCopy = timelineCopy.render;
@@ -34,10 +35,34 @@ type PanelState =
   | { phase: "idle" }
   | { phase: "rendering"; frame: number; totalFrames: number }
   | { phase: "failed"; message: string }
-  | { phase: "done"; url: string; output: RenderOutput; saved: boolean };
+  | { phase: "done"; url: string; output: RenderOutput };
 
 const formatMegabytes = (bytes: number): string =>
   `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+/** A shot whose rendered clip runs longer or shorter than its planned board duration. */
+type ClipMismatch = { shotNumber: number; actualSeconds: number; plannedSeconds: number };
+
+/** Clip lengths differ from the board by more than rounding noise. */
+const MISMATCH_EPSILON_SECONDS = 0.1;
+
+const findClipMismatches = (
+  shots: readonly Shot[],
+  assets: Record<AssetId, Asset>,
+): ClipMismatch[] =>
+  shots.flatMap((shot, position) => {
+    const video = shot.videoAssetId ? assets[shot.videoAssetId] : undefined;
+    if (!video || video.duration === null) return [];
+    const diff = Math.abs(video.duration - shot.durationSeconds);
+    if (diff < MISMATCH_EPSILON_SECONDS) return [];
+    return [
+      {
+        shotNumber: position + 1,
+        actualSeconds: video.duration,
+        plannedSeconds: shot.durationSeconds,
+      },
+    ];
+  });
 
 /**
  * The final render: every shot with burned captions plus the audio mix,
@@ -52,9 +77,13 @@ export const RenderPanel = ({
   tracks,
 }: RenderPanelProps) => {
   const [state, setState] = useState<PanelState>({ phase: "idle" });
-  const [saving, setSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const urlRef = useRef<string | null>(null);
+
+  const mismatches = useMemo(
+    () => findClipMismatches(shots, assets),
+    [shots, assets],
+  );
 
   // Revoke the result url when replaced or on unmount; cancel any run.
   useEffect(
@@ -98,9 +127,36 @@ export const RenderPanel = ({
       }
       return;
     }
+
+    // Auto-save so a reload never loses a finished render; replace this
+    // project's previous auto-saved final cut instead of accumulating them.
+    const assetsStore = useAssetsStore.getState();
+    const stale = Object.values(assetsStore.assets).filter(
+      (asset) =>
+        asset.projectId === project.id &&
+        asset.kind === "video" &&
+        asset.prompt === renderCopy.assetLabel,
+    );
+    await assetsStore.removeAssets(stale.map((asset) => asset.id));
+    await assetsStore.saveAsset(
+      {
+        id: createAssetId(),
+        projectId: project.id,
+        kind: "video",
+        width: result.value.width,
+        height: result.value.height,
+        duration: result.value.durationSeconds,
+        prompt: renderCopy.assetLabel,
+        model: `vixio-render (${result.value.videoCodec})`,
+        seed: 0,
+        createdAt: nowIso(),
+      },
+      result.value.blob,
+    );
+
     const url = URL.createObjectURL(result.value.blob);
     urlRef.current = url;
-    setState({ phase: "done", url, output: result.value, saved: false });
+    setState({ phase: "done", url, output: result.value });
   };
 
   const handleCancel = () => {
@@ -115,29 +171,6 @@ export const RenderPanel = ({
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-  };
-
-  const handleSave = async () => {
-    if (state.phase !== "done" || state.saved) return;
-    setSaving(true);
-    const { output } = state;
-    await useAssetsStore.getState().saveAsset(
-      {
-        id: createAssetId(),
-        projectId: project.id,
-        kind: "video",
-        width: output.width,
-        height: output.height,
-        duration: output.durationSeconds,
-        prompt: renderCopy.assetLabel,
-        model: `vixio-render (${output.videoCodec})`,
-        seed: 0,
-        createdAt: nowIso(),
-      },
-      output.blob,
-    );
-    setSaving(false);
-    setState({ ...state, saved: true });
   };
 
   const percent =
@@ -193,10 +226,25 @@ export const RenderPanel = ({
             )}{" "}
             <span className="font-mono">
               {formatMegabytes(state.output.blob.size)}
-            </span>
+            </span>{" "}
+            {renderCopy.autoSaved}
           </>
         )}
       </p>
+
+      {mismatches.length > 0 ? (
+        <p className="font-mono text-xs text-fg-muted">
+          {mismatches
+            .map((mismatch) =>
+              renderCopy.clipMismatch(
+                mismatch.shotNumber,
+                formatShortSeconds(mismatch.actualSeconds),
+                formatShortSeconds(mismatch.plannedSeconds),
+              ),
+            )
+            .join(" ")}
+        </p>
+      ) : null}
 
       {state.phase === "rendering" ? (
         <MediaFrame
@@ -230,15 +278,6 @@ export const RenderPanel = ({
               onClick={handleDownload}
             >
               {renderCopy.download}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              busy={saving}
-              disabled={state.saved}
-              onClick={() => void handleSave()}
-            >
-              {state.saved ? renderCopy.savedToAssets : renderCopy.saveToAssets}
             </Button>
           </div>
         </div>

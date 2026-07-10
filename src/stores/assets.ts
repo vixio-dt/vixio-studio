@@ -98,6 +98,8 @@ type AssetsState = {
   hydrate: () => Promise<void>;
   saveAsset: (asset: Omit<Asset, "url">, blob: Blob) => Promise<Asset>;
   removeAsset: (id: AssetId) => Promise<void>;
+  /** Bulk delete, for project deletion cleanup; unknown ids are ignored. */
+  removeAssets: (ids: readonly AssetId[]) => Promise<void>;
   /**
    * Register an asset known only from the Drive manifest. It enters the index
    * with an empty url so references resolve, but no blob is fetched until
@@ -153,6 +155,22 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     set((state) => {
       const next = { ...state.assets };
       delete next[id];
+      return { assets: next };
+    });
+  },
+
+  removeAssets: async (ids) => {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return;
+    const existingAssets = get().assets;
+    for (const id of unique) {
+      const existing = existingAssets[id];
+      if (existing && isCached(existing)) URL.revokeObjectURL(existing.url);
+    }
+    await Promise.all(unique.map((id) => deleteStoredAsset(id)));
+    set((state) => {
+      const next = { ...state.assets };
+      for (const id of unique) delete next[id];
       return { assets: next };
     });
   },

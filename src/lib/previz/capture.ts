@@ -25,7 +25,7 @@ import { buildCaptureScene, disposeObject, type CastMember } from "./sceneBuild"
 export const CAPTURE_WIDTH = 640;
 export const CAPTURE_HEIGHT = 360;
 export const CAPTURE_FPS = 12;
-export const CAPTURE_MAX_SECONDS = 6;
+export const CAPTURE_MAX_SECONDS = 10;
 
 export type CapturePass = "clay" | "depth";
 

@@ -23,7 +23,7 @@ export const projectsCopy = {
   deleteDialog: {
     title: "Delete project",
     body: (title: string) =>
-      `Deleting ${title} also removes its scenes, shots, and characters. There is no undo.`,
+      `Deleting ${title} also removes its scenes, shots, characters, and generated media. There is no undo.`,
     confirm: "Delete",
     cancel: "Cancel",
   },
@@ -48,6 +48,9 @@ export const projectsCopy = {
     genrePlaceholder: "drama",
     styleLabel: "Visual style",
     aspectLabel: "Aspect ratio",
+    comicStyleLabel: "Comic style",
+    readingDirectionLabel: "Reading direction",
+    createHelper: "Enter a title and logline to create the project.",
     cancel: "Cancel",
     submit: "Create project",
   },

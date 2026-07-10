@@ -1,7 +1,11 @@
 import { findComicLayout } from "@/domain/constants";
 import type { ComicPage, Panel } from "@/domain/types";
 import { ok, type Result } from "@/lib/result";
-import { renderPageToCanvas, canvasToPngBlob } from "@/lib/comic/compositor";
+import {
+  renderPageToCanvas,
+  canvasToPngBlob,
+  type PageComposition,
+} from "@/lib/comic/compositor";
 import { useAssetsStore } from "@/stores/assets";
 
 /**
@@ -12,7 +16,7 @@ import { useAssetsStore } from "@/stores/assets";
 export type ExportStatus =
   | { state: "idle" }
   | { state: "running"; label: string; done: number; total: number }
-  | { state: "succeeded"; label: string }
+  | { state: "succeeded"; label: string; skippedPanels: number }
   | { state: "failed"; message: string };
 
 export type PageBundle = {
@@ -56,21 +60,27 @@ export const renderPageBlobs = async (
   return ok(blobs);
 };
 
+/** The layout, panels, and asset index the compositor needs for one page. */
+export const pageCompositionsFor = (
+  bundles: readonly PageBundle[],
+): PageComposition[] => {
+  const assets = useAssetsStore.getState().assets;
+  return bundles.map((bundle) => ({
+    layout: findComicLayout(bundle.page.layoutId),
+    panels: bundle.panels,
+    assets,
+  }));
+};
+
 /**
- * Content signature for preview caching. Panel edits do not touch the page's
- * updatedAt, so the signature also folds in each panel's art and lettering,
- * plus the resolved asset urls (hydration fills them in after boot).
+ * Panels whose index sits past their page's current layout: the compositor
+ * skips them, so exports report how many were left out instead of silently
+ * shipping fewer panels than the book has.
  */
-export const pageSignature = (
-  page: ComicPage,
-  panels: readonly Panel[],
-  assetUrlFor: (panel: Panel) => string,
-): string =>
-  [
-    page.updatedAt,
-    page.layoutId,
-    ...panels.map(
-      (panel) =>
-        `${panel.id}:${panel.index}:${panel.imageAssetId ?? ""}:${assetUrlFor(panel)}:${JSON.stringify(panel.balloons)}`,
-    ),
-  ].join("|");
+export const countUnplacedPanels = (bundles: readonly PageBundle[]): number =>
+  bundles.reduce((total, bundle) => {
+    const frameCount = findComicLayout(bundle.page.layoutId).frames.length;
+    return (
+      total + bundle.panels.filter((panel) => panel.index >= frameCount).length
+    );
+  }, 0);

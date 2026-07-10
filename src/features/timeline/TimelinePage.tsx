@@ -7,7 +7,7 @@ import {
   SpeakerSimpleHigh,
   SpeakerSimpleX,
 } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button, EmptyState } from "@/components/ui";
@@ -26,13 +26,7 @@ import {
 import { AudioLanes } from "./AudioLanes";
 import { ConvertToComic } from "./ConvertToComic";
 import { timelineCopy } from "./copy";
-import {
-  buildCutEntries,
-  elapsedSeconds,
-  playbackOffsets,
-  playbackTotalSeconds,
-  totalSeconds,
-} from "./cutLogic";
+import { buildCutEntries, playbackOffsets, playbackTotalSeconds } from "./cutLogic";
 import {
   exportContactSheet,
   exportCutData,
@@ -98,9 +92,7 @@ export const TimelinePage = () => {
   const timings = useMemo(
     () =>
       entries.map((entry) =>
-        entry.kind === "video"
-          ? entry.playbackSeconds + 2
-          : entry.playbackSeconds,
+        entry.kind === "video" ? entry.seconds + 2 : entry.seconds,
       ),
     [entries],
   );
@@ -129,8 +121,9 @@ export const TimelinePage = () => {
       loops,
       offsets,
       totalSeconds: playbackTotalSeconds(entries),
+      dialogueGain: project?.dialogueGain ?? 1,
     };
-  }, [entries, tracks, assets]);
+  }, [entries, tracks, assets, project?.dialogueGain]);
 
   const playback = usePlayback(timings, mix);
   const [muted, setMuted] = useState(true);
@@ -168,8 +161,20 @@ export const TimelinePage = () => {
   const renderedClips = shots.filter(
     (shot) => shot.videoAssetId !== null,
   ).length;
-  const runtime = totalSeconds(entries);
-  const elapsed = elapsedSeconds(entries, playback.index);
+  const runtime = playbackTotalSeconds(entries);
+
+  const handleSeekToFraction = (fraction: number) => {
+    const target = Math.min(runtime, Math.max(0, fraction * runtime));
+    // Nearest entry start at or before the target time; the playback engine
+    // seeks by entry, not by an arbitrary offset within one.
+    let index = 0;
+    for (let position = 0; position < mix.offsets.length; position += 1) {
+      const start = mix.offsets[position] ?? 0;
+      if (start <= target) index = position;
+      else break;
+    }
+    playback.seek(index);
+  };
 
   const handleExportBoard = async () => {
     setExportingBoard(true);
@@ -270,9 +275,15 @@ export const TimelinePage = () => {
             {timelineCopy.transport.shotOf(playback.index + 1, entries.length)}
           </span>
           <span className="text-fg-muted">
-            {formatSeconds(elapsed)} / {formatSeconds(runtime)}
+            {formatSeconds(playback.elapsedSeconds)} / {formatSeconds(runtime)}
           </span>
         </div>
+
+        <PlayheadBar
+          elapsedSeconds={playback.elapsedSeconds}
+          totalSeconds={runtime}
+          onSeekFraction={handleSeekToFraction}
+        />
 
         <div className="-mt-2 flex justify-center">
           <button
@@ -304,6 +315,7 @@ export const TimelinePage = () => {
         <AudioLanes
           project={project}
           entries={entries}
+          characters={characters}
           tracks={tracks}
           totalSeconds={mix.totalSeconds}
         />
@@ -319,5 +331,41 @@ export const TimelinePage = () => {
         <ConvertToComic project={project} />
       </div>
     </div>
+  );
+};
+
+type PlayheadBarProps = {
+  elapsedSeconds: number;
+  totalSeconds: number;
+  onSeekFraction: (fraction: number) => void;
+};
+
+/**
+ * The one moving playhead: a thin scrubber spanning the cut, filled to the
+ * elapsed fraction. Reads the same clock the transport text shows, so the
+ * two never disagree. Clicking seeks to the nearest shot at that time.
+ */
+const PlayheadBar = ({
+  elapsedSeconds,
+  totalSeconds,
+  onSeekFraction,
+}: PlayheadBarProps) => {
+  const fraction = totalSeconds > 0 ? Math.min(1, elapsedSeconds / totalSeconds) : 0;
+
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clicked = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+    onSeekFraction(Math.min(1, Math.max(0, clicked)));
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={timelineCopy.transport.scrub}
+      onClick={handleClick}
+      className="-mt-2 h-1.5 w-full shrink-0 bg-ink-hover"
+    >
+      <div className="h-full bg-accent-media" style={{ width: `${fraction * 100}%` }} />
+    </button>
   );
 };

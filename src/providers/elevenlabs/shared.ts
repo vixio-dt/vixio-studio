@@ -98,6 +98,7 @@ const elevenLabsFetch = async (
   path: string,
   apiKey: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Result<Response>> => {
   let response: Response;
   try {
@@ -108,6 +109,7 @@ const elevenLabsFetch = async (
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch (cause) {
     return err(
@@ -126,8 +128,9 @@ const elevenLabsFetch = async (
 export const elevenLabsGet = async (
   path: string,
   apiKey: string,
+  signal?: AbortSignal,
 ): Promise<Result<unknown>> => {
-  const response = await elevenLabsFetch(path, apiKey, undefined);
+  const response = await elevenLabsFetch(path, apiKey, undefined, signal);
   if (!response.ok) return response;
   try {
     return ok((await response.value.json()) as unknown);

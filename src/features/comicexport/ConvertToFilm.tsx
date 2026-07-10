@@ -185,6 +185,11 @@ export const ConvertToFilm = ({ project }: { project: Project }) => {
                     </ul>
                   </div>
                 ) : null}
+                {plan.captionLineCount > 0 ? (
+                  <p className="font-mono text-xs text-fg-secondary">
+                    {copy.captionsCarried(plan.captionLineCount)}
+                  </p>
+                ) : null}
                 <p className="text-xs text-fg-muted">{copy.invariant}</p>
               </>
             )

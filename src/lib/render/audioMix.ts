@@ -30,6 +30,8 @@ export type MixInput = {
   cues: readonly RenderCue[];
   loops: readonly RenderLoop[];
   totalSeconds: number;
+  /** Master gain for the dialogue lane, 0..1; defaults to 1 when unset. */
+  dialogueGain: number;
 };
 
 const decode = async (
@@ -53,13 +55,20 @@ export const mixCutAudio = async (input: MixInput): Promise<AudioBuffer> => {
     MIX_SAMPLE_RATE,
   );
 
+  let dialogueGainNode: GainNode | null = null;
+  if (input.cues.length > 0) {
+    dialogueGainNode = context.createGain();
+    dialogueGainNode.gain.value = Math.min(1, Math.max(0, input.dialogueGain));
+    dialogueGainNode.connect(context.destination);
+  }
+
   for (const cue of input.cues) {
     if (cue.at >= seconds) continue;
     const buffer = await decode(context, cue.url);
     if (!buffer) continue;
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    source.connect(dialogueGainNode ?? context.destination);
     source.start(Math.max(0, cue.at));
   }
 

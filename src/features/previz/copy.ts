@@ -26,6 +26,11 @@ export const previzCopy = {
   },
   blocking: {
     title: "Set dressing",
+    copyFromPrevious: "Copy blocking from previous shot",
+    copyFromPreviousHelper:
+      "Copies mannequin and prop positions from the previous shot in this scene. The camera stays on this shot's own preset.",
+    copyFromPreviousUnavailable:
+      "Block the previous shot in this scene first to copy from it here.",
     castLabel: "Cast",
     noCast: "No characters in this shot. Attach them on the board.",
     propsLabel: "Props",

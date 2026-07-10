@@ -8,6 +8,8 @@ export const comicExportCopy = {
     pagesPng: "Pages as PNG",
     cbz: "CBZ archive",
     webtoon: "Webtoon strip",
+    webtoonHint:
+      "One tall image, panels stacked full width in reading order, sized for phone scrolling.",
     json: "Project JSON",
   },
   status: {
@@ -17,6 +19,8 @@ export const comicExportCopy = {
     buildingStrip: "Building strip",
     writingJson: "Writing JSON",
     done: (label: string) => `${label} saved.`,
+    skipped: (count: number) =>
+      `${count} unplaced ${count === 1 ? "panel" : "panels"} skipped.`,
   },
   previews: {
     label: "Page previews",
@@ -49,6 +53,8 @@ export const comicExportCopy = {
     cameraItem: (sizeLabel: string, presetLabel: string) =>
       `${sizeLabel}, ${presetLabel.toLowerCase()}`,
     nothingToConvert: "There are no panels to convert yet.",
+    captionsCarried: (count: number) =>
+      `${count} caption ${count === 1 ? "line" : "lines"} carried to shot notes.`,
     invariant: "Re-running updates converted shots and never duplicates them.",
   },
 } as const;

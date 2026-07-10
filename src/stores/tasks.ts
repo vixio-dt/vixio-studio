@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 import {
   aspectRatioToDimensions,
@@ -18,7 +19,13 @@ import type {
   Project,
   Shot,
 } from "@/domain/types";
-import { createAssetId, createTaskId, type AssetId, type TaskId } from "@/lib/id";
+import {
+  createAssetId,
+  createTaskId,
+  type AssetId,
+  type ProjectId,
+  type TaskId,
+} from "@/lib/id";
 import { messageFromUnknown } from "@/lib/result";
 import { nowIso } from "@/lib/time";
 import {
@@ -44,6 +51,9 @@ import { useProjectsStore } from "./projects";
  */
 
 const MAX_FINISHED_TASKS = 30;
+
+/** Shown on a task that was still queued or running when the app reloaded. */
+export const INTERRUPTED_MESSAGE = "Interrupted by reload.";
 
 type EnqueueImageInput = {
   project: Project;
@@ -107,7 +117,26 @@ type TasksState = {
   enqueueDialogue: (input: EnqueueDialogueInput) => TaskId;
   enqueueAudioTrack: (input: EnqueueAudioTrackInput) => TaskId;
   dismissTask: (id: TaskId) => void;
+  /** Removes a not-yet-started task from the queue; a no-op once it is running. */
+  cancelQueuedTask: (id: TaskId) => void;
   clearFinished: () => void;
+};
+
+/**
+ * Minimal record persisted for a task that is still queued or running, so a
+ * reload can surface it as failed instead of letting it vanish silently.
+ * Kept small on purpose: no prompt or model, just enough to render in the
+ * queue drawer and to resolve the same regenerate affordance it belonged to.
+ */
+type InFlightRecord = {
+  id: TaskId;
+  projectId: ProjectId;
+  target: GenerationTarget;
+  label: string;
+};
+
+type PersistedTasksState = {
+  inFlight: InFlightRecord[];
 };
 
 const pendingQueue: QueueEntry[] = [];
@@ -333,129 +362,191 @@ const commitEntry = (entry: QueueEntry): TaskId => {
   return entry.task.id;
 };
 
-export const useTasksStore = create<TasksState>((set) => ({
-  tasks: {},
-  order: [],
+export const useTasksStore = create<TasksState>()(
+  persist<TasksState, [], [], PersistedTasksState>(
+    (set) => ({
+      tasks: {},
+      order: [],
 
-  enqueueImage: (input) => {
-    const task = buildTask({
-      project: input.project,
-      target: input.target,
-      label: input.label,
-      prompt: input.request.prompt,
-      model: resolveImageProvider().name,
-    });
-    const { styleId, ...rest } = input.request;
-    return commitEntry({
-      kind: "image",
-      task,
-      request: { ...rest, style: findVisualStyle(styleId) },
-    });
-  },
-
-  enqueueVideo: (input) => {
-    const task = buildTask({
-      project: input.project,
-      target: input.target,
-      label: input.label,
-      prompt: input.request.prompt,
-      model: resolveVideoProvider().name,
-    });
-    return commitEntry({ kind: "video", task, request: input.request });
-  },
-
-  enqueuePanelImage: (input) => {
-    const prompt =
-      input.prompt ??
-      composePanelPrompt({
-        project: input.project,
-        panel: input.panel,
-        characters: [...input.characters],
-      });
-    const task = buildTask({
-      project: input.project,
-      target: { kind: "panel-image", panelId: input.panel.id },
-      label: input.label,
-      prompt,
-      model: resolveImageProvider().name,
-    });
-    const style = findComicStyle(
-      input.project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID,
-    );
-    return commitEntry({
-      kind: "image",
-      task,
-      request: {
-        prompt,
-        aspectRatio: input.aspectRatio ?? input.project.aspectRatio,
-        seed: input.seed,
-        style: comicStyleToVisualStyle(style),
-        referenceImageUrls: [...(input.referenceImageUrls ?? [])],
+      enqueueImage: (input) => {
+        const task = buildTask({
+          project: input.project,
+          target: input.target,
+          label: input.label,
+          prompt: input.request.prompt,
+          model: resolveImageProvider().name,
+        });
+        const { styleId, ...rest } = input.request;
+        return commitEntry({
+          kind: "image",
+          task,
+          request: { ...rest, style: findVisualStyle(styleId) },
+        });
       },
-    });
-  },
 
-  enqueueDialogue: (input) => {
-    const text = (input.text ?? input.shot.dialogue ?? "").trim();
-    const task = buildTask({
-      project: input.project,
-      target: { kind: "shot-dialogue", shotId: input.shot.id },
-      label: input.label,
-      prompt: text,
-      model: resolveAudioProvider().name,
-    });
-    const request: SpeechRequest = { text };
-    if (input.character?.voiceId) request.voiceId = input.character.voiceId;
-    if (input.character?.name) request.characterName = input.character.name;
-    return commitEntry({ kind: "speech", task, request });
-  },
-
-  enqueueAudioTrack: (input) => {
-    const prompt = (input.prompt ?? input.track.prompt).trim();
-    const task = buildTask({
-      project: input.project,
-      target: { kind: "audio-track", trackId: input.track.id },
-      label: input.label,
-      prompt,
-      model: resolveAudioProvider().name,
-    });
-    return commitEntry({
-      kind: "track",
-      task,
-      request: {
-        prompt,
-        lane: input.track.lane,
-        durationSeconds: input.durationSeconds,
+      enqueueVideo: (input) => {
+        const task = buildTask({
+          project: input.project,
+          target: input.target,
+          label: input.label,
+          prompt: input.request.prompt,
+          model: resolveVideoProvider().name,
+        });
+        return commitEntry({ kind: "video", task, request: input.request });
       },
-    });
-  },
 
-  dismissTask: (id) => {
-    set((state) => {
-      const tasks = { ...state.tasks };
-      delete tasks[id];
-      return { tasks, order: state.order.filter((entry) => entry !== id) };
-    });
-  },
-
-  clearFinished: () => {
-    set((state) => {
-      const keep = state.order.filter((id) => {
-        const task = state.tasks[id];
-        return (
-          task &&
-          (task.status.state === "queued" || task.status.state === "running")
+      enqueuePanelImage: (input) => {
+        const prompt =
+          input.prompt ??
+          composePanelPrompt({
+            project: input.project,
+            panel: input.panel,
+            characters: [...input.characters],
+          });
+        const task = buildTask({
+          project: input.project,
+          target: { kind: "panel-image", panelId: input.panel.id },
+          label: input.label,
+          prompt,
+          model: resolveImageProvider().name,
+        });
+        const style = findComicStyle(
+          input.project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID,
         );
-      });
-      const tasks: TasksState["tasks"] = {};
-      for (const id of keep) {
-        const task = state.tasks[id];
-        if (task) tasks[id] = task;
-      }
-      return { tasks, order: keep };
-    });
-  },
-}));
+        return commitEntry({
+          kind: "image",
+          task,
+          request: {
+            prompt,
+            aspectRatio: input.aspectRatio ?? input.project.aspectRatio,
+            seed: input.seed,
+            style: comicStyleToVisualStyle(style),
+            referenceImageUrls: [...(input.referenceImageUrls ?? [])],
+          },
+        });
+      },
+
+      enqueueDialogue: (input) => {
+        const text = (input.text ?? input.shot.dialogue ?? "").trim();
+        const task = buildTask({
+          project: input.project,
+          target: { kind: "shot-dialogue", shotId: input.shot.id },
+          label: input.label,
+          prompt: text,
+          model: resolveAudioProvider().name,
+        });
+        const request: SpeechRequest = { text };
+        if (input.character?.voiceId) request.voiceId = input.character.voiceId;
+        if (input.character?.name) request.characterName = input.character.name;
+        return commitEntry({ kind: "speech", task, request });
+      },
+
+      enqueueAudioTrack: (input) => {
+        const prompt = (input.prompt ?? input.track.prompt).trim();
+        const task = buildTask({
+          project: input.project,
+          target: { kind: "audio-track", trackId: input.track.id },
+          label: input.label,
+          prompt,
+          model: resolveAudioProvider().name,
+        });
+        return commitEntry({
+          kind: "track",
+          task,
+          request: {
+            prompt,
+            lane: input.track.lane,
+            durationSeconds: input.durationSeconds,
+          },
+        });
+      },
+
+      dismissTask: (id) => {
+        set((state) => {
+          const tasks = { ...state.tasks };
+          delete tasks[id];
+          return { tasks, order: state.order.filter((entry) => entry !== id) };
+        });
+      },
+
+      cancelQueuedTask: (id) => {
+        const pendingIndex = pendingQueue.findIndex((entry) => entry.task.id === id);
+        // Already running (or finished): the running task keeps its own affordances.
+        if (pendingIndex === -1) return;
+        pendingQueue.splice(pendingIndex, 1);
+        set((state) => {
+          const tasks = { ...state.tasks };
+          delete tasks[id];
+          return { tasks, order: state.order.filter((entry) => entry !== id) };
+        });
+      },
+
+      clearFinished: () => {
+        set((state) => {
+          const keep = state.order.filter((id) => {
+            const task = state.tasks[id];
+            return (
+              task &&
+              (task.status.state === "queued" || task.status.state === "running")
+            );
+          });
+          const tasks: TasksState["tasks"] = {};
+          for (const id of keep) {
+            const task = state.tasks[id];
+            if (task) tasks[id] = task;
+          }
+          return { tasks, order: keep };
+        });
+      },
+    }),
+    {
+      name: "vixio-tasks-inflight",
+      version: 1,
+      // Persist only enough to notice an interrupted task on reload; finished
+      // history is intentionally ephemeral.
+      partialize: (state) => ({
+        inFlight: state.order.flatMap((id): InFlightRecord[] => {
+          const task = state.tasks[id];
+          if (
+            !task ||
+            (task.status.state !== "queued" && task.status.state !== "running")
+          ) {
+            return [];
+          }
+          return [
+            {
+              id: task.id,
+              projectId: task.projectId,
+              target: task.target,
+              label: task.label,
+            },
+          ];
+        }),
+      }),
+      merge: (persisted, current) => {
+        const inFlight = (persisted as Partial<PersistedTasksState> | null)
+          ?.inFlight;
+        if (!inFlight || inFlight.length === 0) return current;
+        const tasks = { ...current.tasks };
+        const order = [...current.order];
+        for (const record of inFlight) {
+          tasks[record.id] = {
+            id: record.id,
+            projectId: record.projectId,
+            target: record.target,
+            label: record.label,
+            prompt: "",
+            model: "",
+            status: { state: "failed", message: INTERRUPTED_MESSAGE },
+            createdAt: nowIso(),
+          };
+          if (!order.includes(record.id)) order.push(record.id);
+        }
+        return { ...current, tasks, order };
+      },
+    },
+  ),
+);
 
 export const selectActiveTaskCount = (state: {
   tasks: Record<TaskId, GenerationTask>;
@@ -464,6 +555,18 @@ export const selectActiveTaskCount = (state: {
     (task) =>
       task.status.state === "queued" || task.status.state === "running",
   ).length;
+
+// Warn before an accidental reload or tab close drops the in-flight queue.
+// A queued or running task still shows up after reload (see the persist
+// `merge` above), but as a failed, regenerate-from-scratch entry, so this
+// confirmation is the first line of defense.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (event) => {
+    if (selectActiveTaskCount(useTasksStore.getState()) === 0) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+}
 
 /** Convenience: dimensions for a project's aspect ratio. */
 export const dimensionsForProject = (project: Project) =>

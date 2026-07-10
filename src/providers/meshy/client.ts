@@ -76,6 +76,7 @@ const readApiErrorDetail = (payload: unknown): string =>
 const meshyRequest = async (
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<Result<unknown>> => {
   const apiKey = readApiKey();
   if (apiKey.length === 0) {
@@ -91,6 +92,7 @@ const meshyRequest = async (
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch (cause) {
     return err(
@@ -242,8 +244,8 @@ export const getTask = async (
 };
 
 /** Remaining credits; also the cheapest way to verify a key. */
-export const getBalance = async (): Promise<Result<number>> => {
-  const response = await meshyRequest("/openapi/v1/balance");
+export const getBalance = async (signal?: AbortSignal): Promise<Result<number>> => {
+  const response = await meshyRequest("/openapi/v1/balance", undefined, signal);
   if (!response.ok) return response;
   const payload = response.value;
   const balance = isRecord(payload) ? payload["balance"] : undefined;

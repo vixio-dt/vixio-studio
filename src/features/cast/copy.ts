@@ -1,3 +1,5 @@
+import type { ProjectMode } from "@/domain/types";
+
 /**
  * Visible strings for the cast room. Sentence case, functional verbs,
  * no dashes. Components render from here and never define prose inline.
@@ -47,6 +49,7 @@ export const castCopy = {
     "Paste an ElevenLabs voice id. Preview mode ignores it and synthesizes offline.",
   voiceIdPlaceholder: "Voice id",
   testVoice: "Test voice",
+  voicePlaying: "Playing",
   voiceTestFailed: "Voice test failed.",
   voiceTestLine: (name: string): string =>
     `${name} clears their throat and counts to three.`,
@@ -55,8 +58,10 @@ export const castCopy = {
   usePortrait: "Use this portrait",
 
   deleteCharacter: "Delete character",
-  deleteBody: (name: string): string =>
-    `This removes ${name} from the cast and unlinks them from every scene and shot. Portraits already generated stay in the project assets.`,
+  deleteBody: (name: string, mode: ProjectMode): string =>
+    mode === "comic"
+      ? `This removes ${name} from the cast and unlinks them from every scene and panel. Portraits already generated stay in the project assets.`
+      : `This removes ${name} from the cast and unlinks them from every scene and shot. Portraits already generated stay in the project assets.`,
   cancel: "Cancel",
   confirmDelete: "Delete",
 

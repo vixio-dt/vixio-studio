@@ -17,6 +17,16 @@ export const LETTERING_PAPER = "#ffffff";
 const MIN_FONT_PX = 11;
 const MAX_FONT_PX = 46;
 
+/** Body-fit search: shrink the font this much per step until the text block
+ * clears the panel or the size floor is hit. */
+const FONT_FIT_STEP = 0.92;
+const MAX_FONT_FIT_STEPS = 24;
+
+/** Cloud and burst outlines bulge past their nominal radius; pad clamping by
+ * this much so the drawn spikes and bumps stay inside the panel too. */
+const BULGE_KINDS: readonly BalloonKind[] = ["thought", "burst"];
+const BULGE_FACTOR = 1.22;
+
 export type BalloonGeometry = {
   kind: BalloonKind;
   /** Balloon center in panel pixels. */
@@ -164,41 +174,78 @@ const thoughtTailPath = (
     .join(" ");
 };
 
-/** Full geometry for one balloon over a panel of the given pixel size. */
-export const layoutBalloon = (
+/** Half extents of the ellipse-shaped kinds need extra clearance so the text
+ * block stays inside the curve, not just inside the bounding box. */
+const isEllipseKind = (kind: BalloonKind): boolean =>
+  kind === "speech" || kind === "thought" || kind === "whisper" || kind === "burst";
+
+/** Text block and body half-extents for one font size, everything else fixed. */
+const measureBody = (
   balloon: Balloon,
-  panelWidth: number,
-  panelHeight: number,
-): BalloonGeometry => {
-  const cx = balloon.x * panelWidth;
-  const cy = balloon.y * panelHeight;
-  const bodyWidth = Math.max(24, balloon.width * panelWidth);
-
-  const isSfx = balloon.kind === "sfx";
-  const baseFont = Math.min(
-    MAX_FONT_PX,
-    Math.max(MIN_FONT_PX, bodyWidth * 0.13),
-  );
-  const fontSize = isSfx ? Math.min(MAX_FONT_PX * 2, baseFont * 1.9) : baseFont;
+  bodyWidth: number,
+  fontSize: number,
+): { lineHeight: number; lines: string[]; rx: number; ry: number } => {
   const lineHeight = fontSize * 1.28;
-
   const textWidth = balloon.kind === "caption" ? bodyWidth * 0.9 : bodyWidth * 0.82;
   const maxChars = Math.max(4, Math.floor(textWidth / (fontSize * 0.56)));
   const lines = wrapBalloonText(balloon.text, maxChars);
   const textBlockHeight = lines.length * lineHeight;
 
-  let rx = bodyWidth / 2;
-  let ry = textBlockHeight / 2 + fontSize * 0.55;
-  if (
-    balloon.kind === "speech" ||
-    balloon.kind === "thought" ||
-    balloon.kind === "whisper" ||
-    balloon.kind === "burst"
+  const rx = bodyWidth / 2;
+  const ry = isEllipseKind(balloon.kind)
+    ? textBlockHeight / 2 + fontSize * 0.9
+    : textBlockHeight / 2 + fontSize * 0.55;
+  return { lineHeight, lines, rx, ry };
+};
+
+/** Shift a center so its half-extent stays inside [0, total]; when the shape
+ * is wider than the panel, centering is the best we can do. */
+const clampCenter = (center: number, halfExtent: number, total: number): number => {
+  if (total <= halfExtent * 2) return total / 2;
+  return Math.min(Math.max(center, halfExtent), total - halfExtent);
+};
+
+/** Full geometry for one balloon over a panel of the given pixel size. The
+ * body is always kept fully inside the panel: font size shrinks stepwise to
+ * the floor first, then the center shifts inward as a last resort, so text
+ * never slices at the panel border. */
+export const layoutBalloon = (
+  balloon: Balloon,
+  panelWidth: number,
+  panelHeight: number,
+): BalloonGeometry => {
+  const bodyWidth = Math.max(24, balloon.width * panelWidth);
+  const isSfx = balloon.kind === "sfx";
+  const fontScale = balloon.fontScale ?? 1;
+
+  const baseFont = Math.min(
+    MAX_FONT_PX,
+    Math.max(MIN_FONT_PX, bodyWidth * 0.13),
+  );
+  let fontSize = Math.max(
+    MIN_FONT_PX,
+    (isSfx ? Math.min(MAX_FONT_PX * 2, baseFont * 1.9) : baseFont) * fontScale,
+  );
+
+  const bulge = BULGE_KINDS.includes(balloon.kind) ? BULGE_FACTOR : 1;
+  let { lineHeight, lines, rx, ry } = measureBody(balloon, bodyWidth, fontSize);
+
+  // Shrink the font stepwise until the text block's height clears the panel
+  // or the size floor is reached; the body's width tracks the balloon's
+  // width setting, not the font, so only height responds to shrinking.
+  let step = 0;
+  while (
+    ry * bulge * 2 > panelHeight &&
+    fontSize > MIN_FONT_PX &&
+    step < MAX_FONT_FIT_STEPS
   ) {
-    // Ellipses need extra room so the text block stays inside the curve.
-    rx = bodyWidth / 2;
-    ry = textBlockHeight / 2 + fontSize * 0.9;
+    fontSize = Math.max(MIN_FONT_PX, fontSize * FONT_FIT_STEP);
+    ({ lineHeight, lines, rx, ry } = measureBody(balloon, bodyWidth, fontSize));
+    step += 1;
   }
+
+  const cx = clampCenter(balloon.x * panelWidth, rx * bulge, panelWidth);
+  const cy = clampCenter(balloon.y * panelHeight, ry * bulge, panelHeight);
 
   const tailAngle = balloon.tailAngle ?? 115;
   let bodyPath = "";
@@ -240,4 +287,31 @@ export const layoutBalloon = (
     dashed: balloon.kind === "whisper",
     strokeWidth: Math.max(1.5, fontSize * 0.09),
   };
+};
+
+/** Cycled offsets so sequential spawns fan out instead of landing on top of
+ * each other; both manual adds and dialogue import share this. */
+const SPAWN_OFFSETS: readonly { dx: number; dy: number }[] = [
+  { dx: 0, dy: 0 },
+  { dx: 0.14, dy: 0.1 },
+  { dx: -0.14, dy: 0.1 },
+  { dx: 0.14, dy: -0.1 },
+  { dx: -0.14, dy: -0.1 },
+  { dx: 0, dy: 0.2 },
+];
+
+const clampFraction = (value: number): number => Math.min(0.92, Math.max(0.08, value));
+
+/**
+ * Spawn position for the nth new balloon at a base point, cycling through a
+ * fixed set of offsets so a run of new balloons fans out across the panel
+ * instead of stacking dead center.
+ */
+export const spawnBalloonPosition = (
+  baseX: number,
+  baseY: number,
+  index: number,
+): { x: number; y: number } => {
+  const offset = SPAWN_OFFSETS[index % SPAWN_OFFSETS.length] ?? SPAWN_OFFSETS[0]!;
+  return { x: clampFraction(baseX + offset.dx), y: clampFraction(baseY + offset.dy) };
 };

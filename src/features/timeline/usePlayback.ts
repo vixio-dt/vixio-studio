@@ -3,6 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 export type Playback = {
   index: number;
   playing: boolean;
+  /**
+   * Continuous elapsed time across the whole cut, in seconds. Advances
+   * smoothly during playback (driven by requestAnimationFrame) and freezes
+   * on pause; the single authoritative clock the transport and the progress
+   * bar read.
+   */
+  elapsedSeconds: number;
   play: () => void;
   pause: () => void;
   next: () => void;
@@ -35,6 +42,8 @@ export type PlaybackMix = {
   offsets: readonly number[];
   /** Total stage time of the cut in seconds. */
   totalSeconds: number;
+  /** Master gain for the dialogue lane, 0..1; defaults to 1 when unset. */
+  dialogueGain: number;
 };
 
 const EMPTY_MIX: PlaybackMix = {
@@ -42,6 +51,7 @@ const EMPTY_MIX: PlaybackMix = {
   loops: [],
   offsets: [],
   totalSeconds: 0,
+  dialogueGain: 1,
 };
 
 /**
@@ -54,6 +64,8 @@ type AudioEngine = {
   context: AudioContext | null;
   nodes: AudioScheduledSourceNode[];
   loopGains: Map<string, GainNode>;
+  /** Shared gain stage every dialogue cue routes through. */
+  dialogueGain: GainNode | null;
   buffers: Map<string, Promise<AudioBuffer>>;
   /** Bumped to invalidate in-flight async schedules. */
   generation: number;
@@ -63,6 +75,7 @@ const createEngine = (): AudioEngine => ({
   context: null,
   nodes: [],
   loopGains: new Map(),
+  dialogueGain: null,
   buffers: new Map(),
   generation: 0,
 });
@@ -80,6 +93,8 @@ const stopEngineNodes = (engine: AudioEngine): void => {
   engine.nodes = [];
   for (const gain of engine.loopGains.values()) gain.disconnect();
   engine.loopGains.clear();
+  engine.dialogueGain?.disconnect();
+  engine.dialogueGain = null;
 };
 
 const loadBuffer = (
@@ -139,12 +154,20 @@ const scheduleMix = async (
   const remaining = mix.totalSeconds - playhead;
   if (remaining <= 0) return;
 
+  let dialogueGainNode: GainNode | null = null;
+  if (mix.cues.length > 0) {
+    dialogueGainNode = context.createGain();
+    dialogueGainNode.gain.value = Math.min(1, Math.max(0, mix.dialogueGain));
+    dialogueGainNode.connect(context.destination);
+    engine.dialogueGain = dialogueGainNode;
+  }
+
   for (const cue of mix.cues) {
     const buffer = decoded.get(cue.url);
     if (!buffer) continue;
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    source.connect(dialogueGainNode ?? context.destination);
     const lead = cue.at - playhead;
     if (lead >= 0) {
       source.start(now + lead);
@@ -282,6 +305,9 @@ export const usePlayback = (
       const gainNode = engine.loopGains.get(loop.id);
       if (gainNode) gainNode.gain.value = loop.muted ? 0 : loop.gain;
     }
+    if (engine.dialogueGain) {
+      engine.dialogueGain.gain.value = Math.min(1, Math.max(0, mix.dialogueGain));
+    }
   }, [mix]);
 
   // Release the context with the component.
@@ -296,9 +322,74 @@ export const usePlayback = (
     [],
   );
 
+  /* ------------------------------------------------------------------ */
+  /* Elapsed clock: a smooth, moving playhead                            */
+  /* ------------------------------------------------------------------ */
+
+  // Stage length of an entry, derived from the offsets the mix already
+  // carries (offsets[i+1] - offsets[i], or the remainder to the total for
+  // the last entry). Read from the ref so the rAF loop below never needs to
+  // restart just because the mix object identity changed.
+  const stageSecondsFor = useCallback((entryIndex: number): number => {
+    const current = mixRef.current;
+    const start = current.offsets[entryIndex] ?? 0;
+    const next = current.offsets[entryIndex + 1];
+    return next !== undefined
+      ? Math.max(0, next - start)
+      : Math.max(0, current.totalSeconds - start);
+  }, []);
+
+  const [entryElapsed, setEntryElapsed] = useState(0);
+  const entryElapsedRef = useRef(0);
+  const clockRef = useRef({ startedAt: 0, base: 0 });
+  const rafRef = useRef<number | null>(null);
+  const lastClockIndexRef = useRef(safeIndex);
+
+  // A new entry always starts its within-entry clock at zero, whether it was
+  // reached by auto-advance or by a seek. Adjusted during render (not in an
+  // effect) so the reset lands in the same commit as the index change.
+  if (lastClockIndexRef.current !== safeIndex) {
+    lastClockIndexRef.current = safeIndex;
+    entryElapsedRef.current = 0;
+    setEntryElapsed(0);
+  }
+
+  // Smoothly advance the within-entry clock while playing; freeze it on
+  // pause. On an index change this effect also re-runs, picking up the
+  // fresh zero baseline set above during render.
+  useEffect(() => {
+    if (!activePlaying) {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      return;
+    }
+    clockRef.current = { startedAt: performance.now(), base: entryElapsedRef.current };
+    const tick = () => {
+      const cap = stageSecondsFor(indexRef.current);
+      const value = Math.min(
+        cap,
+        clockRef.current.base + (performance.now() - clockRef.current.startedAt) / 1000,
+      );
+      entryElapsedRef.current = value;
+      setEntryElapsed(value);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [activePlaying, safeIndex, stageSecondsFor]);
+
+  const elapsedSeconds = Math.min(
+    mix.totalSeconds,
+    (mix.offsets[safeIndex] ?? 0) + entryElapsed,
+  );
+
   return {
     index: safeIndex,
     playing: activePlaying,
+    elapsedSeconds,
     play,
     pause,
     next,

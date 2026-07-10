@@ -181,6 +181,30 @@ export const removeProp = (
   props: blockout.props.filter((prop) => prop.id !== propId),
 });
 
+/**
+ * Copies set dressing from another shot's saved blockout: mannequin
+ * transforms carry over by matching character id (a character absent from
+ * the source keeps its current placement), and props are copied wholesale.
+ * The camera track is left untouched; it stays seeded from this shot's own
+ * preset.
+ */
+export const copyBlockingFromSource = (
+  current: ShotBlockout,
+  source: ShotBlockout,
+): ShotBlockout => {
+  const sourceByCharacter = new Map(
+    source.mannequins.map((mannequin) => [mannequin.characterId, mannequin]),
+  );
+  const mannequins = current.mannequins.map((mannequin) => {
+    const match = sourceByCharacter.get(mannequin.characterId);
+    return match
+      ? { ...mannequin, x: match.x, z: match.z, rotationY: match.rotationY }
+      : mannequin;
+  });
+  const props = source.props.map((prop) => ({ ...prop }));
+  return { ...current, mannequins, props };
+};
+
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
 /* ------------------------------------------------------------------ */
@@ -219,6 +243,35 @@ const readStore = (): StoredBlockouts => {
 
 export const loadBlockout = (shotId: ShotId): ShotBlockout | null =>
   readStore().blockouts[shotId] ?? null;
+
+/**
+ * Drops the stored blockouts for the given shots. Used by project deletion
+ * cleanup so a removed project does not leave its blockouts orphaned in
+ * localStorage; a no-op for shots that never had one.
+ */
+export const removeBlockouts = (
+  shotIds: readonly ShotId[],
+): Result<void, BlockoutError> => {
+  if (shotIds.length === 0) return ok(undefined);
+  try {
+    const store = readStore();
+    let changed = false;
+    for (const id of shotIds) {
+      if (id in store.blockouts) {
+        delete store.blockouts[id];
+        changed = true;
+      }
+    }
+    if (!changed) return ok(undefined);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    return ok(undefined);
+  } catch {
+    return err({
+      code: "storage-failed",
+      message: "The blockout could not be removed locally.",
+    });
+  }
+};
 
 export const saveBlockout = (
   shotId: ShotId,
@@ -299,7 +352,7 @@ export const resolveBlockout = (
     mannequins.every((mannequin, index) => mannequin === stored.mannequins[index]);
   const camera =
     stored === null || stored.seededPresetId !== presetId
-      ? seedCameraTrack(presetId, subjectPoint(mannequins))
+      ? seedCameraTrack(presetId, subjectPoint(mannequins), shot.lens, shot.size)
       : stored.camera;
 
   if (stored && castUnchanged && camera === stored.camera) return stored;

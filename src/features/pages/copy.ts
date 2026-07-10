@@ -28,5 +28,13 @@ export const pagesCopy = {
     moveUp: "Move page earlier",
     moveDown: "Move page later",
     remove: "Delete page",
+    thumbnailFailed: "Could not render this page.",
+  },
+  shrinkDialog: {
+    title: "Switch layout?",
+    body: (shown: number, total: number, orphaned: number) =>
+      `This layout shows ${shown} of ${total} panels. ${orphaned} ${orphaned === 1 ? "panel keeps" : "panels keep"} their art and lettering but leave the page.`,
+    cancel: "Cancel",
+    confirm: "Switch layout",
   },
 } as const;

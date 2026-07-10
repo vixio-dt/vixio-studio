@@ -1,5 +1,6 @@
 import { findComicLayout } from "@/domain/constants";
 import type {
+  BalloonKind,
   CameraAngle,
   CameraMovement,
   CameraPresetId,
@@ -101,6 +102,8 @@ export type ComicToFilmPlan = {
   sceneBreakdown: ComicToFilmSceneRow[];
   /** Aggregate of the camera heuristic across every converted panel. */
   cameraCounts: CameraCount[];
+  /** Caption balloon lines that landed in a created or updated shot's notes. */
+  captionLineCount: number;
 };
 
 type CameraChoice = {
@@ -142,22 +145,30 @@ const cameraForPanel = (panel: Panel, layout: ComicLayout): CameraChoice => {
   };
 };
 
-/** Speech and thought balloon texts in stored order; captions excluded. */
+/** Balloon kinds that carry spoken or thought text into shot dialogue. */
+const DIALOGUE_KINDS: readonly BalloonKind[] = [
+  "speech",
+  "thought",
+  "whisper",
+  "burst",
+];
+
+/** Speech, thought, whisper, and burst text, in the panel's balloon order. */
 const dialogueFromPanel = (panel: Panel): string | null => {
   const lines = panel.balloons
-    .filter((balloon) => balloon.kind === "speech" || balloon.kind === "thought")
+    .filter((balloon) => DIALOGUE_KINDS.includes(balloon.kind))
     .map((balloon) => balloon.text.trim())
     .filter((text) => text.length > 0);
   return lines.length > 0 ? lines.join("\n") : null;
 };
 
-/** Caption texts joined; becomes the shot's prompt notes prefix. */
-const captionsFromPanel = (panel: Panel): string =>
+/** Caption texts for a panel, each a separate line for the notes count; the
+ * joined string becomes the shot's prompt notes prefix. */
+const captionLinesFromPanel = (panel: Panel): string[] =>
   panel.balloons
     .filter((balloon) => balloon.kind === "caption")
     .map((balloon) => balloon.text.trim())
-    .filter((text) => text.length > 0)
-    .join(" ");
+    .filter((text) => text.length > 0);
 
 const sameIds = (a: readonly CharacterId[], b: readonly CharacterId[]): boolean =>
   a.length === b.length && a.every((id, position) => id === b[position]);
@@ -225,6 +236,7 @@ export const planComicToFilm = (graph: ProjectGraph): ComicToFilmPlan => {
   const cameraTally = new Map<string, CameraCount>();
   const sceneBreakdown: ComicToFilmSceneRow[] = [];
   let unchangedCount = 0;
+  let captionLineCount = 0;
 
   scenes.forEach((scene, position) => {
     const panels = panelsByScene.get(scene.id) ?? [];
@@ -255,7 +267,8 @@ export const planComicToFilm = (graph: ProjectGraph): ComicToFilmPlan => {
       cameraTally.set(tallyKey, tally);
 
       const dialogue = dialogueFromPanel(panel);
-      const captions = captionsFromPanel(panel);
+      const captionLines = captionLinesFromPanel(panel);
+      const captions = captionLines.join(" ");
       const existing = shotBySourcePanel.get(panel.id);
 
       if (existing) {
@@ -280,6 +293,7 @@ export const planComicToFilm = (graph: ProjectGraph): ComicToFilmPlan => {
         // Captions only fill empty notes; user-written notes stay untouched.
         if (captions.length > 0 && existing.promptNotes.length === 0) {
           patch.promptNotes = captions;
+          captionLineCount += captionLines.length;
         }
         if (Object.keys(patch).length === 0) {
           unchangedCount += 1;
@@ -307,6 +321,7 @@ export const planComicToFilm = (graph: ProjectGraph): ComicToFilmPlan => {
         durationSeconds: camera.durationSeconds,
         promptNotes: captions,
       });
+      if (captionLines.length > 0) captionLineCount += captionLines.length;
       nextIndex += 1;
       row.creates += 1;
     }
@@ -322,6 +337,7 @@ export const planComicToFilm = (graph: ProjectGraph): ComicToFilmPlan => {
     unchangedCount,
     sceneBreakdown,
     cameraCounts: [...cameraTally.values()].sort((a, b) => b.count - a.count),
+    captionLineCount,
   };
 };
 

@@ -26,6 +26,9 @@ type BlockingPanelProps = {
   onAddProp: (kind: PropKind) => void;
   onRemoveProp: (propId: string) => void;
   onRotateBlock: (key: string, rotationY: number) => void;
+  /** True when a previous shot in this scene has a saved blockout to copy. */
+  canCopyFromPrevious: boolean;
+  onCopyFromPrevious: () => void;
 };
 
 /** Set dressing controls: cast list, prop palette, and the selected block. */
@@ -37,6 +40,8 @@ export const BlockingPanel = ({
   onAddProp,
   onRemoveProp,
   onRotateBlock,
+  canCopyFromPrevious,
+  onCopyFromPrevious,
 }: BlockingPanelProps) => {
   const [propKind, setPropKind] = useState<PropKind>("box");
   const copy = previzCopy.blocking;
@@ -59,6 +64,23 @@ export const BlockingPanel = ({
 
   return (
     <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2 border-b border-line pb-4">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canCopyFromPrevious}
+          onClick={onCopyFromPrevious}
+          data-testid="previz-copy-blocking"
+        >
+          {copy.copyFromPrevious}
+        </Button>
+        <p className="text-xs text-fg-muted">
+          {canCopyFromPrevious
+            ? copy.copyFromPreviousHelper
+            : copy.copyFromPreviousUnavailable}
+        </p>
+      </div>
+
       <div className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-fg-secondary">
           {copy.castLabel}

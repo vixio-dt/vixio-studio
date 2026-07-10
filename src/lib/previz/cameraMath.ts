@@ -1,4 +1,4 @@
-import type { CameraPresetId } from "@/domain/types";
+import type { CameraPresetId, LensChoice, ShotSize } from "@/domain/types";
 
 import type { CameraKeyframe, CameraTrack, Vec3 } from "./blockout";
 
@@ -188,11 +188,13 @@ const rotateAroundY = (position: Vec3, center: Vec3, degrees: number): Vec3 => {
 };
 
 /**
- * Seeds a camera track for a preset around the given subject point (the
+ * Builds the named preset's camera track around the given subject point (the
  * mannequin centroid, or stage origin). Positions treat +z as "in front of
- * the subject" and heights are absolute stage meters.
+ * the subject" and heights are absolute stage meters. Focal lengths baked in
+ * here are each preset's own defaults; `seedCameraTrack` below adapts them to
+ * the shot's actual lens and size.
  */
-export const seedCameraTrack = (
+const buildPresetTrack = (
   presetId: CameraPresetId,
   subject: Vec3,
 ): CameraTrack => {
@@ -303,4 +305,69 @@ export const seedCameraTrack = (
         keyframe(at(1.6, 1.6, 3.2), 85, at(0, 1.55, 0)),
       );
   }
+};
+
+/* ------------------------------------------------------------------ */
+/* Lens and shot size adaptation                                       */
+/* ------------------------------------------------------------------ */
+
+/** Numeric focal length from a lens id, e.g. "85mm" -> 85. */
+export const focalFromLens = (lens: LensChoice): number =>
+  Number.parseInt(lens, 10);
+
+/**
+ * How far the seeded camera sits from its subject, relative to the preset's
+ * own baked distance. Wider shots read farther back, tighter shots read
+ * closer in; over-the-shoulder and insert lean close like a two-shot and a
+ * detail shot would.
+ */
+const SHOT_SIZE_DISTANCE_SCALE: Record<ShotSize, number> = {
+  "extreme-wide": 1.6,
+  wide: 1.25,
+  medium: 1,
+  "close-up": 0.75,
+  "extreme-close-up": 0.55,
+  "over-the-shoulder": 0.9,
+  insert: 0.5,
+};
+
+/**
+ * Rescales a track's two focal lengths onto the shot's chosen lens, keeping
+ * the ratio between the A and B keyframes intact so presets that ramp focal
+ * on purpose (crash zoom, dolly zoom) still ramp, just anchored to the shot's
+ * lens instead of the preset's hardcoded default.
+ */
+const applyLensFocal = (track: CameraTrack, lensFocalMm: number): CameraTrack => {
+  const baseFocal = fovToFocal(track.a.fov);
+  if (!Number.isFinite(baseFocal) || baseFocal <= 0) return track;
+  const scale = lensFocalMm / baseFocal;
+  const scaled = (keyframe: CameraKeyframe): CameraKeyframe => ({
+    ...keyframe,
+    fov: focalToFov(clampFocal(fovToFocal(keyframe.fov) * scale)),
+  });
+  return { ...track, a: scaled(track.a), b: scaled(track.b) };
+};
+
+/**
+ * Seeds a camera track for a preset, adapted to the shot: the fov comes from
+ * the shot's lens (not the preset's hardcoded focal), and the seeded
+ * distance from the subject scales with the shot's size. Only used when
+ * seeding a fresh blockout or reacting to a preset change; edited tracks are
+ * never touched retroactively.
+ */
+export const seedCameraTrack = (
+  presetId: CameraPresetId,
+  subject: Vec3,
+  lens: LensChoice,
+  size: ShotSize,
+): CameraTrack => {
+  const base = buildPresetTrack(presetId, subject);
+  const withLens = applyLensFocal(base, clampFocal(focalFromLens(lens)));
+  const distanceScale = SHOT_SIZE_DISTANCE_SCALE[size];
+  if (distanceScale === 1) return withLens;
+  return {
+    ...withLens,
+    a: dollyKeyframe(withLens.a, distanceScale),
+    b: dollyKeyframe(withLens.b, distanceScale),
+  };
 };

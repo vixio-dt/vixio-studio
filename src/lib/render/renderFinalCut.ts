@@ -44,9 +44,6 @@ export const RENDER_FPS = 24;
 /** Scene boundary transition: 0.25s out plus 0.25s in, fade to black. */
 const FADE_SECONDS = 0.25;
 
-/** A shot with nothing rendered plays as a short slate, matching the cut. */
-const SLATE_SECONDS = 1.5;
-
 const VIDEO_BITRATE = 5_000_000;
 const AUDIO_BITRATE = 128_000;
 
@@ -156,12 +153,9 @@ const buildPlan = (input: RenderInput): PlannedShot[] => {
       ? input.assets[shot.dialogueAssetId]
       : undefined;
     const kind = video ? "video" : frame ? "image" : "slate";
-    const seconds =
-      kind === "video"
-        ? (video?.duration ?? shot.durationSeconds)
-        : kind === "image"
-          ? shot.durationSeconds
-          : SLATE_SECONDS;
+    // A rendered clip's real length wins; a still or a bare slate holds its
+    // planned board duration, matching the cut's one authoritative clock.
+    const seconds = video ? (video.duration ?? shot.durationSeconds) : shot.durationSeconds;
     plan.push({
       shot,
       kind,
@@ -508,7 +502,12 @@ export const renderFinalCut = async (
           loops.push({ url: asset.url, gain: track.gain, muted: track.muted });
         }
       }
-      const mixed = await mixCutAudio({ cues, loops, totalSeconds });
+      const mixed = await mixCutAudio({
+        cues,
+        loops,
+        totalSeconds,
+        dialogueGain: input.project.dialogueGain ?? 1,
+      });
       await audioSource.add(mixed);
       audioSource.close();
     }

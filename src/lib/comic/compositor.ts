@@ -1,4 +1,4 @@
-import type { Asset, ComicLayout, Panel } from "@/domain/types";
+import type { Asset, ComicLayout, Panel, ReadingDirection } from "@/domain/types";
 import type { AssetId } from "@/lib/id";
 import { appError, err, ok, type Result } from "@/lib/result";
 
@@ -8,7 +8,7 @@ import {
   LETTERING_INK,
   LETTERING_PAPER,
 } from "./balloons";
-import { frameForPanelIndex } from "./reading";
+import { frameForPanelIndex, orderPanelsForReading } from "./reading";
 
 /**
  * Canvas page compositor: a white page at the layout's pixel size, panel art
@@ -117,6 +117,50 @@ const drawBalloons = (
   }
 };
 
+/**
+ * Draw one panel's art (or its empty fill), balloons, and ink border into a
+ * rect of an already-sized canvas context. Shared by the full-page compositor
+ * and the webtoon strip, so a panel always reads the same either way.
+ */
+const drawPanelIntoRect = async (
+  context: CanvasRenderingContext2D,
+  panel: Panel,
+  assets: Record<AssetId, Asset>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<void> => {
+  const asset = panel.imageAssetId ? assets[panel.imageAssetId] : undefined;
+  const image = asset && asset.url.length > 0 ? await loadImage(asset.url) : null;
+
+  context.save();
+  context.beginPath();
+  context.rect(x, y, width, height);
+  context.clip();
+  if (image) {
+    drawCover(context, image, x, y, width, height);
+  } else {
+    context.fillStyle = EMPTY_PANEL_FILL;
+    context.fillRect(x, y, width, height);
+  }
+  drawBalloons(context, panel, x, y, width, height);
+  context.restore();
+
+  context.strokeStyle = INK;
+  context.lineWidth = PANEL_BORDER_PX;
+  context.strokeRect(
+    x + PANEL_BORDER_PX / 2,
+    y + PANEL_BORDER_PX / 2,
+    width - PANEL_BORDER_PX,
+    height - PANEL_BORDER_PX,
+  );
+};
+
+/** A panel has nothing to show yet: no generated art and no lettering. */
+const isEmptyPanel = (panel: Panel): boolean =>
+  !panel.imageAssetId && panel.balloons.length === 0;
+
 /** Render one full page. Missing or unloadable art degrades to empty frames. */
 export const renderPageToCanvas = async (
   input: PageComposition,
@@ -140,32 +184,7 @@ export const renderPageToCanvas = async (
     const y = frame.y * canvas.height;
     const width = frame.w * canvas.width;
     const height = frame.h * canvas.height;
-
-    const asset = panel.imageAssetId ? assets[panel.imageAssetId] : undefined;
-    const image =
-      asset && asset.url.length > 0 ? await loadImage(asset.url) : null;
-
-    context.save();
-    context.beginPath();
-    context.rect(x, y, width, height);
-    context.clip();
-    if (image) {
-      drawCover(context, image, x, y, width, height);
-    } else {
-      context.fillStyle = EMPTY_PANEL_FILL;
-      context.fillRect(x, y, width, height);
-    }
-    drawBalloons(context, panel, x, y, width, height);
-    context.restore();
-
-    context.strokeStyle = INK;
-    context.lineWidth = PANEL_BORDER_PX;
-    context.strokeRect(
-      x + PANEL_BORDER_PX / 2,
-      y + PANEL_BORDER_PX / 2,
-      width - PANEL_BORDER_PX,
-      height - PANEL_BORDER_PX,
-    );
+    await drawPanelIntoRect(context, panel, assets, x, y, width, height);
   }
 
   return ok(canvas);
@@ -193,34 +212,76 @@ export const composePageBlob = async (
   return canvasToPngBlob(rendered.value);
 };
 
+/** Every webtoon panel renders at this pixel width, phone-scroll sized. */
+const WEBTOON_STRIP_WIDTH = 800;
+/** Consistent breathing room between stacked panels. */
+const WEBTOON_GUTTER_PX = 24;
+
 /**
- * Webtoon strip: every page scaled to the narrowest page's width and stacked
- * vertically into one tall canvas.
+ * Webtoon strip: a panel-per-segment vertical reflow, not a page paste-up.
+ * Panels flatten across every page in reading order (right-to-left books
+ * mirror row order, same as the panel lab and page planner), each panel
+ * renders at the full strip width and its own aspect ratio, and a consistent
+ * gutter separates panels so the result reads top to bottom on a phone.
+ * Panels beyond their page's layout, and panels with neither art nor
+ * lettering, are skipped, same as the page compositor.
  */
-export const composeWebtoonStrip = (
-  pages: readonly HTMLCanvasElement[],
-): Result<HTMLCanvasElement> => {
-  if (pages.length === 0) {
-    return err(appError("not-found", "No pages to stack"));
+export const composeWebtoonStrip = async (
+  pages: readonly PageComposition[],
+  direction: ReadingDirection,
+): Promise<Result<HTMLCanvasElement>> => {
+  type Segment = { canvas: HTMLCanvasElement; height: number };
+  const segments: Segment[] = [];
+
+  for (const { layout, panels, assets } of pages) {
+    const ordered = orderPanelsForReading(panels, layout, direction).filter(
+      (panel) => panel.index < layout.frames.length && !isEmptyPanel(panel),
+    );
+    for (const panel of ordered) {
+      const frame = frameForPanelIndex(layout, panel.index);
+      const aspect =
+        (frame.w * layout.pageSize.width) / (frame.h * layout.pageSize.height);
+      const height = Math.max(1, Math.round(WEBTOON_STRIP_WIDTH / aspect));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = WEBTOON_STRIP_WIDTH;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return err(appError("storage-failed", "Canvas 2d context is unavailable"));
+      }
+      context.fillStyle = PAGE_BACKGROUND;
+      context.fillRect(0, 0, WEBTOON_STRIP_WIDTH, height);
+      await drawPanelIntoRect(context, panel, assets, 0, 0, WEBTOON_STRIP_WIDTH, height);
+
+      segments.push({ canvas, height });
+    }
   }
-  const targetWidth = Math.min(...pages.map((page) => page.width));
-  const heights = pages.map((page) =>
-    Math.round(page.height * (targetWidth / page.width)),
-  );
+
+  if (segments.length === 0) {
+    return err(appError("not-found", "No panels to stack"));
+  }
+
+  const totalHeight =
+    segments.reduce((total, segment) => total + segment.height, 0) +
+    WEBTOON_GUTTER_PX * (segments.length - 1);
+
   const strip = document.createElement("canvas");
-  strip.width = targetWidth;
-  strip.height = heights.reduce((total, height) => total + height, 0);
+  strip.width = WEBTOON_STRIP_WIDTH;
+  strip.height = totalHeight;
   const context = strip.getContext("2d");
   if (!context) {
     return err(appError("storage-failed", "Canvas 2d context is unavailable"));
   }
   context.fillStyle = PAGE_BACKGROUND;
   context.fillRect(0, 0, strip.width, strip.height);
+
   let offsetY = 0;
-  pages.forEach((page, index) => {
-    const height = heights[index] ?? 0;
-    context.drawImage(page, 0, offsetY, targetWidth, height);
-    offsetY += height;
+  segments.forEach((segment, index) => {
+    context.drawImage(segment.canvas, 0, offsetY);
+    offsetY += segment.height;
+    if (index < segments.length - 1) offsetY += WEBTOON_GUTTER_PX;
   });
+
   return ok(strip);
 };

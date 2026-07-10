@@ -12,6 +12,9 @@ export const panelLabCopy = {
     noDescription: "No description yet",
     balloonCount: (count: number) =>
       `${count} ${count === 1 ? "balloon" : "balloons"}`,
+    unplaced: "Unplaced",
+    unplacedHint:
+      "Not shown in the page's current layout. Art and lettering stay saved, and exports skip it until the layout grows.",
   },
   stage: {
     label: (pageNumber: number, panelNumber: number) =>
@@ -39,6 +42,7 @@ export const panelLabCopy = {
     noSpeaker: "No speaker",
     widthLabel: "Width",
     tailLabel: "Tail angle",
+    fontScaleLabel: "Type size",
     remove: "Delete balloon",
     balloonLabel: (position: number) => `Balloon ${position}`,
     defaultText: {
@@ -49,6 +53,11 @@ export const panelLabCopy = {
       caption: "Meanwhile",
       sfx: "Krak!",
     },
+    importDialogue: "Import dialogue",
+    importDialogueHint: (count: number) =>
+      `Adds ${count} speech ${count === 1 ? "balloon" : "balloons"} parsed from Name colon line lines in the description.`,
+    importDialogueEmpty:
+      "No new dialogue lines found in the description. Add lines formatted as Name colon line there first.",
   },
   console: {
     promptLabel: "Prompt",

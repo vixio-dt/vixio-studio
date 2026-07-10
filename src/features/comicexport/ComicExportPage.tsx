@@ -20,8 +20,9 @@ import { useActiveProject } from "../shared/useActiveProject";
 import { ConvertToFilm } from "./ConvertToFilm";
 import { comicExportCopy } from "./copy";
 import {
+  countUnplacedPanels,
+  pageCompositionsFor,
   renderPageBlobs,
-  renderPageCanvases,
   type ExportStatus,
   type PageBundle,
 } from "./exportLogic";
@@ -72,7 +73,11 @@ export const ComicExportPage = () => {
     rendered.value.forEach((blob, position) => {
       downloadBlob(blob, `${stem}-${pageFileName(position)}`);
     });
-    setStatus({ state: "succeeded", label: comicExportCopy.actions.pagesPng });
+    setStatus({
+      state: "succeeded",
+      label: comicExportCopy.actions.pagesPng,
+      skippedPanels: countUnplacedPanels(bundles),
+    });
   };
 
   const runCbz = async () => {
@@ -95,24 +100,20 @@ export const ComicExportPage = () => {
       return;
     }
     downloadBlob(archive.value, `${stem}.cbz`);
-    setStatus({ state: "succeeded", label: comicExportCopy.actions.cbz });
+    setStatus({
+      state: "succeeded",
+      label: comicExportCopy.actions.cbz,
+      skippedPanels: countUnplacedPanels(bundles),
+    });
   };
 
   const runWebtoon = async () => {
-    const label = comicExportCopy.status.renderingPages;
+    const label = comicExportCopy.status.buildingStrip;
     setStatus({ state: "running", label, done: 0, total: pages.length });
-    const rendered = await renderPageCanvases(bundles, progress(label));
-    if (!rendered.ok) {
-      setStatus({ state: "failed", message: rendered.error.message });
-      return;
-    }
-    setStatus({
-      state: "running",
-      label: comicExportCopy.status.buildingStrip,
-      done: pages.length,
-      total: pages.length,
-    });
-    const strip = composeWebtoonStrip(rendered.value);
+    const strip = await composeWebtoonStrip(
+      pageCompositionsFor(bundles),
+      project.readingDirection ?? "ltr",
+    );
     if (!strip.ok) {
       setStatus({ state: "failed", message: strip.error.message });
       return;
@@ -123,7 +124,11 @@ export const ComicExportPage = () => {
       return;
     }
     downloadBlob(encoded.value, `${stem}-webtoon.png`);
-    setStatus({ state: "succeeded", label: comicExportCopy.actions.webtoon });
+    setStatus({
+      state: "succeeded",
+      label: comicExportCopy.actions.webtoon,
+      skippedPanels: countUnplacedPanels(bundles),
+    });
   };
 
   const runJson = () => {
@@ -139,7 +144,11 @@ export const ComicExportPage = () => {
       panelsForPage: (page) => selectPanelsForPage(panelsById, page.id),
     });
     downloadBlob(blob, `${stem}.json`);
-    setStatus({ state: "succeeded", label: comicExportCopy.actions.json });
+    setStatus({
+      state: "succeeded",
+      label: comicExportCopy.actions.json,
+      skippedPanels: 0,
+    });
   };
 
   return (
@@ -169,6 +178,7 @@ export const ComicExportPage = () => {
           size="sm"
           data-testid="export-webtoon"
           disabled={disabled}
+          title={comicExportCopy.actions.webtoonHint}
           onClick={() => void runWebtoon()}
         >
           {comicExportCopy.actions.webtoon}
@@ -199,9 +209,14 @@ export const ComicExportPage = () => {
               </span>
             </>
           ) : null}
-          {status.state === "succeeded"
-            ? comicExportCopy.status.done(status.label)
-            : null}
+          {status.state === "succeeded" ? (
+            <>
+              {comicExportCopy.status.done(status.label)}
+              {status.skippedPanels > 0
+                ? ` ${comicExportCopy.status.skipped(status.skippedPanels)}`
+                : null}
+            </>
+          ) : null}
           {status.state === "failed" ? status.message : null}
         </p>
       </header>

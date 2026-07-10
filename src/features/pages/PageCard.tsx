@@ -1,11 +1,13 @@
 import { ArrowDown, ArrowUp, Trash } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
+import { useState } from "react";
 
-import { Select } from "@/components/ui";
+import { Button, Dialog, Select, Skeleton } from "@/components/ui";
 import { COMIC_LAYOUTS, findComicLayout } from "@/domain/constants";
 import type { ComicLayoutId, ComicPage, Panel, ReadingDirection } from "@/domain/types";
 import type { PanelId } from "@/lib/id";
 import { displayNumberForPanel, readingOrderForLayout } from "@/lib/comic/reading";
+import { usePageThumbnail } from "@/lib/comic/pageThumbnail";
 
 import { pagesCopy } from "./copy";
 
@@ -42,6 +44,18 @@ export const PageCard = ({
   const layout = findComicLayout(page.layoutId);
   const { width, height } = layout.pageSize;
   const pageNumber = position + 1;
+  const { url: thumbnailUrl, failed: thumbnailFailed } = usePageThumbnail(
+    page,
+    panels,
+  );
+
+  /** Layout the panel count no longer fully fits; confirm before switching. */
+  const [pendingLayoutId, setPendingLayoutId] = useState<ComicLayoutId | null>(
+    null,
+  );
+  const pendingFrameCount = pendingLayoutId
+    ? findComicLayout(pendingLayoutId).frames.length
+    : 0;
 
   const firstPanelId = (): PanelId | null => {
     const order = readingOrderForLayout(layout, direction);
@@ -50,6 +64,21 @@ export const PageCard = ({
       if (panel) return panel.id;
     }
     return panels[0]?.id ?? null;
+  };
+
+  const handleLayoutSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextLayoutId = event.target.value as ComicLayoutId;
+    const nextFrameCount = findComicLayout(nextLayoutId).frames.length;
+    if (nextFrameCount < panels.length) {
+      setPendingLayoutId(nextLayoutId);
+      return;
+    }
+    onLayoutChange(nextLayoutId);
+  };
+
+  const confirmLayoutSwitch = () => {
+    if (pendingLayoutId) onLayoutChange(pendingLayoutId);
+    setPendingLayoutId(null);
   };
 
   return (
@@ -86,58 +115,70 @@ export const PageCard = ({
         type="button"
         aria-label={pagesCopy.card.open(pageNumber)}
         onClick={() => onOpenPanel(firstPanelId())}
-        className="bg-white/5 p-1.5 ring-1 ring-line transition-colors duration-150 hover:ring-line-strong"
+        className="relative block w-full overflow-hidden bg-ink-canvas p-1.5 ring-1 ring-line transition-colors duration-150 hover:ring-line-strong"
       >
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="block w-full bg-ink-canvas"
-          style={{ aspectRatio: `${width} / ${height}` }}
-          role="img"
-          aria-hidden
-        >
-          {layout.frames.map((frame, frameIndex) => {
-            const panel = panels.find(
-              (candidate) => candidate.index === frameIndex,
-            );
-            const number = displayNumberForPanel(layout, direction, frameIndex);
-            const fontSize = Math.min(width, height) * 0.07;
-            return (
-              <g
-                key={frameIndex}
-                onClick={(event) => {
-                  if (!panel) return;
-                  event.stopPropagation();
-                  onOpenPanel(panel.id);
-                }}
-                aria-label={pagesCopy.card.openPanel(pageNumber, number)}
-                className={panel ? "cursor-pointer" : undefined}
-              >
-                <rect
-                  x={frame.x * width}
-                  y={frame.y * height}
-                  width={frame.w * width}
-                  height={frame.h * height}
-                  className={`stroke-line-strong ${
-                    panel?.imageAssetId
-                      ? "fill-accent-media/25"
-                      : panel
-                        ? "fill-ink-raised"
-                        : "fill-transparent"
-                  } transition-colors duration-150 hover:fill-ink-hover`}
-                  strokeWidth={Math.min(width, height) * 0.006}
-                />
-                <text
-                  x={frame.x * width + fontSize * 0.6}
-                  y={frame.y * height + fontSize * 1.25}
-                  fontSize={fontSize}
-                  className="fill-fg-muted font-mono"
+        <div className="relative" style={{ aspectRatio: `${width} / ${height}` }}>
+          {thumbnailUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt=""
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          ) : thumbnailFailed ? (
+            <p className="absolute inset-0 flex items-center justify-center px-4 text-center text-[11px] text-danger">
+              {pagesCopy.card.thumbnailFailed}
+            </p>
+          ) : (
+            <Skeleton className="absolute inset-0" />
+          )}
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="absolute inset-0 block h-full w-full"
+            preserveAspectRatio="none"
+            role="img"
+            aria-hidden
+          >
+            {layout.frames.map((frame, frameIndex) => {
+              const panel = panels.find(
+                (candidate) => candidate.index === frameIndex,
+              );
+              const number = displayNumberForPanel(layout, direction, frameIndex);
+              const fontSize = Math.min(width, height) * 0.07;
+              return (
+                <g
+                  key={frameIndex}
+                  onClick={(event) => {
+                    if (!panel) return;
+                    event.stopPropagation();
+                    onOpenPanel(panel.id);
+                  }}
+                  aria-label={pagesCopy.card.openPanel(pageNumber, number)}
+                  className={panel ? "cursor-pointer" : undefined}
                 >
-                  {number}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+                  <rect
+                    x={frame.x * width}
+                    y={frame.y * height}
+                    width={frame.w * width}
+                    height={frame.h * height}
+                    fill="transparent"
+                    className="stroke-line-strong transition-colors duration-150 hover:fill-accent-media/20"
+                    strokeWidth={Math.min(width, height) * 0.006}
+                  />
+                  <text
+                    x={frame.x * width + fontSize * 0.6}
+                    y={frame.y * height + fontSize * 1.25}
+                    fontSize={fontSize}
+                    className="fill-fg font-mono"
+                    style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)" }}
+                    strokeWidth={fontSize * 0.22}
+                  >
+                    {number}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
       </button>
 
       <div className="flex items-center justify-between gap-2">
@@ -148,9 +189,7 @@ export const PageCard = ({
           id={`page-layout-${page.id}`}
           data-testid="page-layout-select"
           value={page.layoutId}
-          onChange={(event) =>
-            onLayoutChange(event.target.value as ComicLayoutId)
-          }
+          onChange={handleLayoutSelect}
           className="h-8 w-auto grow text-[13px]"
         >
           {COMIC_LAYOUTS.map((candidate) => (
@@ -163,6 +202,39 @@ export const PageCard = ({
           {pagesCopy.card.panelCount(panels.length)}
         </span>
       </div>
+
+      <Dialog
+        open={pendingLayoutId !== null}
+        onClose={() => setPendingLayoutId(null)}
+        title={pagesCopy.shrinkDialog.title}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="font-mono text-sm text-fg-secondary">
+            {pagesCopy.shrinkDialog.body(
+              pendingFrameCount,
+              panels.length,
+              panels.length - pendingFrameCount,
+            )}
+          </p>
+          <footer className="flex items-center justify-end gap-2 border-t border-line pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingLayoutId(null)}
+            >
+              {pagesCopy.shrinkDialog.cancel}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              data-testid="layout-shrink-confirm"
+              onClick={confirmLayoutSwitch}
+            >
+              {pagesCopy.shrinkDialog.confirm}
+            </Button>
+          </footer>
+        </div>
+      </Dialog>
     </article>
   );
 };

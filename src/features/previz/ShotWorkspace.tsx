@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Segmented } from "@/components/ui";
 import { findCameraPreset } from "@/domain/constants";
@@ -6,6 +6,7 @@ import type { CameraPresetId, Character, Project, Shot } from "@/domain/types";
 import { createAssetId } from "@/lib/id";
 import {
   addProp,
+  copyBlockingFromSource,
   loadBlockout,
   moveBlock,
   presetIdForShot,
@@ -32,7 +33,7 @@ import {
 } from "@/lib/previz/capture";
 import { nowIso } from "@/lib/time";
 import { useAssetsStore } from "@/stores/assets";
-import { useProjectsStore } from "@/stores/projects";
+import { selectShotsForScene, useProjectsStore } from "@/stores/projects";
 
 import { BlockingPanel } from "./BlockingPanel";
 import { CameraPanel } from "./CameraPanel";
@@ -69,6 +70,20 @@ export const ShotWorkspace = ({
   shotNumber,
 }: ShotWorkspaceProps) => {
   const updateShot = useProjectsStore((state) => state.updateShot);
+  const shotsById = useProjectsStore((state) => state.shots);
+
+  // The previous shot in the same scene, if it has ever been saved: source
+  // for "copy blocking from previous shot" so a fresh shot does not start
+  // from a bare stage after the last one was fully dressed.
+  const previousShot = useMemo(() => {
+    const sceneShots = selectShotsForScene(shotsById, shot.sceneId);
+    const position = sceneShots.findIndex((candidate) => candidate.id === shot.id);
+    return position > 0 ? (sceneShots[position - 1] ?? null) : null;
+  }, [shotsById, shot.sceneId, shot.id]);
+  const previousBlockout = useMemo(
+    () => (previousShot ? loadBlockout(previousShot.id) : null),
+    [previousShot],
+  );
 
   const [blockout, setBlockoutView] = useState<ShotBlockout>(() =>
     resolveBlockout(shot, loadBlockout(shot.id)),
@@ -133,6 +148,11 @@ export const ShotWorkspace = ({
     );
   };
 
+  const handleCopyFromPrevious = () => {
+    if (!previousBlockout) return;
+    mutate((current) => copyBlockingFromSource(current, previousBlockout));
+  };
+
   /* ---------------------------------------------------------------- */
   /* Camera handlers                                                   */
   /* ---------------------------------------------------------------- */
@@ -140,7 +160,12 @@ export const ShotWorkspace = ({
   const reseedCamera = (presetId: CameraPresetId) => {
     mutate((current) => ({
       ...current,
-      camera: seedCameraTrack(presetId, subjectPoint(current.mannequins)),
+      camera: seedCameraTrack(
+        presetId,
+        subjectPoint(current.mannequins),
+        shot.lens,
+        shot.size,
+      ),
       seededPresetId: presetId,
     }));
   };
@@ -334,6 +359,8 @@ export const ShotWorkspace = ({
             onAddProp={handleAddProp}
             onRemoveProp={handleRemoveProp}
             onRotateBlock={handleRotateBlock}
+            canCopyFromPrevious={previousBlockout !== null}
+            onCopyFromPrevious={handleCopyFromPrevious}
           />
         ) : (
           <CameraPanel

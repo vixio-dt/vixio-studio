@@ -19,6 +19,7 @@ export const timelineCopy = {
     shotOf: (current: number, total: number) => `shot ${current} / ${total}`,
     mute: "Mute clip audio",
     unmute: "Unmute clip audio",
+    scrub: "Seek in cut",
   },
   filmstrip: {
     label: "Filmstrip",
@@ -69,9 +70,10 @@ export const timelineCopy = {
       `Final cut (${container}, ${height}p)`,
     assetLabel: "Final cut render",
     download: "Download",
-    saveToAssets: "Save to assets",
-    savedToAssets: "Saved to assets",
+    autoSaved: "Saved to assets automatically.",
     playerTitle: "Final cut preview",
+    clipMismatch: (shotNumber: number, actual: string, planned: string) =>
+      `Shot ${shotNumber} clip runs ${actual}, planned ${planned}.`,
   },
   empty: {
     title: "Nothing on the timeline",

@@ -36,6 +36,7 @@ export const settingsCopy = {
     checking: "Checking the key",
     valid: "Key accepted",
     emptyKey: "Enter a key first.",
+    falInvalidFormat: "The key format is key_id:key_secret.",
     falNetwork: (detail: string) => `Could not reach fal.ai. ${detail}`,
     falRejected: (status: number) => `fal.ai rejected the key (${status}).`,
   },

@@ -285,7 +285,7 @@ const DriveSection = () => {
             <TextInput
               id={inputId}
               aria-describedby={describedBy}
-              type="password"
+              type="text"
               autoComplete="off"
               placeholder={settingsCopy.drive.clientIdPlaceholder}
               value={googleClientId}

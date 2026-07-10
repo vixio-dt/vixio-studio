@@ -31,6 +31,8 @@ const laneCopy = timelineCopy.lanes;
 type AudioLanesProps = {
   project: Project;
   entries: readonly CutEntry[];
+  /** Project cast; scoped to this project, used to resolve per-line speakers. */
+  characters: readonly Character[];
   /** Ordered music-then-ambience tracks; row testids suffix this order. */
   tracks: readonly AudioTrack[];
   /** Stage total in seconds; caps generated track length at 30s. */
@@ -45,13 +47,16 @@ type AudioLanesProps = {
 export const AudioLanes = ({
   project,
   entries,
+  characters,
   tracks,
   totalSeconds,
 }: AudioLanesProps) => {
+  const updateProject = useProjectsStore((state) => state.updateProject);
   const dialogueEntries = entries.filter(
     (entry) => (entry.shot.dialogue ?? "").trim().length > 0,
   );
   const trackSeconds = Math.max(1, Math.min(30, totalSeconds));
+  const dialogueGain = project.dialogueGain ?? 1;
 
   return (
     <section className="flex flex-col gap-4 border-t border-line pt-4">
@@ -60,9 +65,31 @@ export const AudioLanes = ({
       </h2>
 
       <div className="flex flex-col gap-2">
-        <p className="text-[13px] font-medium text-fg-secondary">
-          {laneCopy.dialogueLane}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] font-medium text-fg-secondary">
+            {laneCopy.dialogueLane}
+          </p>
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
+            {laneCopy.gainLabel}
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              data-testid="cut-dialogue-gain"
+              value={dialogueGain}
+              onChange={(event) =>
+                updateProject(project.id, {
+                  dialogueGain: Number(event.target.value),
+                })
+              }
+              className="h-1 w-28 accent-accent-media"
+            />
+            <span className="font-mono text-fg-secondary">
+              {dialogueGain.toFixed(2)}
+            </span>
+          </label>
+        </div>
         {dialogueEntries.length === 0 ? (
           <p className="text-xs text-fg-muted">{laneCopy.dialogueEmpty}</p>
         ) : (
@@ -72,6 +99,7 @@ export const AudioLanes = ({
                 key={entry.shot.id}
                 project={project}
                 entry={entry}
+                characters={characters}
                 index={entries.indexOf(entry)}
               />
             ))}
@@ -119,14 +147,49 @@ const isActive = (task: GenerationTask | null): boolean =>
 const failureOf = (task: GenerationTask | null): string | null =>
   task !== null && task.status.state === "failed" ? task.status.message : null;
 
+/** Matches a leading "NAME:" cue at the start of a dialogue line. */
+const SPEAKER_PREFIX = /^\s*([A-Za-z][\w' -]{0,40}):\s*(.*)$/;
+
+/**
+ * The character named by a leading "NAME:" cue on the dialogue's first
+ * non-blank line, matched case-insensitively against the project's cast.
+ * Null when the line carries no prefix or the name matches nobody, so the
+ * caller falls back to the shot's first attached character.
+ */
+const resolveLineSpeaker = (
+  dialogue: string,
+  characters: readonly Character[],
+): Character | null => {
+  const firstLine = dialogue.split(/\r?\n/).find((line) => line.trim().length > 0);
+  if (!firstLine) return null;
+  const match = SPEAKER_PREFIX.exec(firstLine);
+  if (!match) return null;
+  const name = match[1]?.trim().toLowerCase();
+  if (!name) return null;
+  return (
+    characters.find((character) => character.name.trim().toLowerCase() === name) ??
+    null
+  );
+};
+
+/** Strips a leading "NAME:" cue from every line so it is never spoken aloud. */
+const stripSpeakerPrefixes = (dialogue: string): string =>
+  dialogue
+    .split(/\r?\n/)
+    .map((line) => SPEAKER_PREFIX.exec(line)?.[2] ?? line)
+    .join("\n")
+    .trim();
+
 type DialogueChipProps = {
   project: Project;
   entry: CutEntry;
+  /** Project cast; resolves a per-line "NAME:" speaker cue to a voice. */
+  characters: readonly Character[];
   /** Position across the whole cut; 1-based in labels, suffix in testids. */
   index: number;
 };
 
-const DialogueChip = ({ project, entry, index }: DialogueChipProps) => {
+const DialogueChip = ({ project, entry, characters, index }: DialogueChipProps) => {
   const { shot } = entry;
   const charactersById = useProjectsStore((state) => state.characters);
   const enqueueDialogue = useTasksStore((state) => state.enqueueDialogue);
@@ -137,17 +200,23 @@ const DialogueChip = ({ project, entry, index }: DialogueChipProps) => {
       candidate.target.shotId === shot.id,
   );
 
-  const speaker = firstSpeaker(shot.characterIds, charactersById);
+  const dialogueText = shot.dialogue ?? "";
+  // A "NAME:" cue on the line picks that character's voice over the shot's
+  // default attached speaker; falls back when nothing matches.
+  const lineSpeaker = resolveLineSpeaker(dialogueText, characters);
+  const speaker = lineSpeaker ?? firstSpeaker(shot.characterIds, charactersById);
   const generating = isActive(task);
   const failure = failureOf(task);
   const shotNumber = index + 1;
 
   const handleGenerate = () => {
+    const cleaned = stripSpeakerPrefixes(dialogueText);
     enqueueDialogue({
       project,
       shot,
       character: speaker,
       label: laneCopy.dialogueTask(shotNumber),
+      text: cleaned.length > 0 ? cleaned : undefined,
     });
   };
 
