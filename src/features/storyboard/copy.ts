@@ -24,6 +24,11 @@ export const storyboardCopy = {
     retry: "Retry",
     frameAlt: (shotNumber: number) => `Frame for shot ${shotNumber}`,
   },
+  camera: {
+    presetLabel: "Camera move",
+    bodyLabel: "Camera body",
+    none: "None",
+  },
   frameTaskLabel: (sceneNumber: number, shotNumber: number) =>
     `Frame, scene ${sceneNumber} shot ${shotNumber}`,
   editDialog: {

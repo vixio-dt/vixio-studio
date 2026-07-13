@@ -1,15 +1,27 @@
 import { useSettingsStore } from "@/stores/settings";
 
-import { falImageProvider, falTextProvider, falVideoProvider } from "./fal";
+import { elevenLabsAudioProvider } from "./elevenlabs/audio";
+import {
+  falAudioProvider,
+  falImageProvider,
+  falTextProvider,
+  falVideoProvider,
+} from "./fal";
 import {
   geminiImageProvider,
   geminiTextProvider,
   geminiVideoProvider,
 } from "./gemini";
+import { previewAudioProvider } from "./mock/audio";
 import { previewImageProvider } from "./mock/image";
 import { previewTextProvider } from "./mock/text";
 import { previewVideoProvider } from "./mock/video";
-import type { ImageProvider, TextProvider, VideoProvider } from "./types";
+import type {
+  AudioProvider,
+  ImageProvider,
+  TextProvider,
+  VideoProvider,
+} from "./types";
 
 /**
  * Providers resolve at call time so settings changes apply to the next
@@ -43,4 +55,16 @@ export const resolveVideoProvider = (): VideoProvider => {
   if (videoProvider === "gemini" && hasGeminiKey()) return geminiVideoProvider;
   if (videoProvider === "fal" && hasFalKey()) return falVideoProvider;
   return previewVideoProvider;
+};
+
+const hasElevenLabsKey = (): boolean =>
+  useSettingsStore.getState().elevenLabsApiKey.trim().length > 0;
+
+export const resolveAudioProvider = (): AudioProvider => {
+  const { audioProvider } = useSettingsStore.getState();
+  if (audioProvider === "elevenlabs" && hasElevenLabsKey()) {
+    return elevenLabsAudioProvider;
+  }
+  if (audioProvider === "fal" && hasFalKey()) return falAudioProvider;
+  return previewAudioProvider;
 };

@@ -10,6 +10,9 @@ import { persist } from "zustand/middleware";
 
 export type ProviderChoice = "vixio-preview" | "gemini" | "fal";
 
+/** Audio (speech and track) generation routes through its own provider set. */
+export type AudioProviderChoice = "vixio-preview" | "elevenlabs" | "fal";
+
 /**
  * The Vixio Creatives Google OAuth client id ships as the default so the
  * deployed app is sign-in-ready for the whole team without per-device setup.
@@ -25,28 +28,41 @@ const DEFAULT_GOOGLE_CLIENT_ID =
 type SettingsState = {
   geminiApiKey: string;
   falApiKey: string;
+  elevenLabsApiKey: string;
+  meshyApiKey: string;
   googleClientId: string;
   textProvider: ProviderChoice;
   imageProvider: ProviderChoice;
   videoProvider: ProviderChoice;
+  audioProvider: AudioProviderChoice;
   geminiTextModel: string;
   geminiImageModel: string;
   geminiVideoModel: string;
   falTextModel: string;
   falImageModel: string;
   falVideoModel: string;
+  falAudioModel: string;
+  elevenLabsTtsModel: string;
+  /** Used when a speech request carries no voice id (Rachel by default). */
+  elevenLabsDefaultVoiceId: string;
   setGeminiApiKey: (key: string) => void;
   setFalApiKey: (key: string) => void;
+  setElevenLabsApiKey: (key: string) => void;
+  setMeshyApiKey: (key: string) => void;
   setGoogleClientId: (clientId: string) => void;
   setTextProvider: (choice: ProviderChoice) => void;
   setImageProvider: (choice: ProviderChoice) => void;
   setVideoProvider: (choice: ProviderChoice) => void;
+  setAudioProvider: (choice: AudioProviderChoice) => void;
   setGeminiTextModel: (model: string) => void;
   setGeminiImageModel: (model: string) => void;
   setGeminiVideoModel: (model: string) => void;
   setFalTextModel: (model: string) => void;
   setFalImageModel: (model: string) => void;
   setFalVideoModel: (model: string) => void;
+  setFalAudioModel: (model: string) => void;
+  setElevenLabsTtsModel: (model: string) => void;
+  setElevenLabsDefaultVoiceId: (voiceId: string) => void;
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -54,28 +70,41 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       geminiApiKey: "",
       falApiKey: "",
+      elevenLabsApiKey: "",
+      meshyApiKey: "",
       googleClientId: DEFAULT_GOOGLE_CLIENT_ID,
       textProvider: "vixio-preview",
       imageProvider: "vixio-preview",
       videoProvider: "vixio-preview",
+      audioProvider: "vixio-preview",
       geminiTextModel: "gemini-2.5-flash",
       geminiImageModel: "gemini-2.5-flash-image",
       geminiVideoModel: "veo-3.1-fast-generate-001",
       falTextModel: "google/gemini-flash-1.5",
       falImageModel: "fal-ai/flux/dev",
       falVideoModel: "fal-ai/kling-video/v1.6/standard/image-to-video",
+      falAudioModel: "fal-ai/elevenlabs/tts/eleven-v3",
+      elevenLabsTtsModel: "eleven_multilingual_v2",
+      elevenLabsDefaultVoiceId: "21m00Tcm4TlvDq8ikWAM",
       setGeminiApiKey: (geminiApiKey) => set({ geminiApiKey }),
       setFalApiKey: (falApiKey) => set({ falApiKey }),
+      setElevenLabsApiKey: (elevenLabsApiKey) => set({ elevenLabsApiKey }),
+      setMeshyApiKey: (meshyApiKey) => set({ meshyApiKey }),
       setGoogleClientId: (googleClientId) => set({ googleClientId }),
       setTextProvider: (textProvider) => set({ textProvider }),
       setImageProvider: (imageProvider) => set({ imageProvider }),
       setVideoProvider: (videoProvider) => set({ videoProvider }),
+      setAudioProvider: (audioProvider) => set({ audioProvider }),
       setGeminiTextModel: (geminiTextModel) => set({ geminiTextModel }),
       setGeminiImageModel: (geminiImageModel) => set({ geminiImageModel }),
       setGeminiVideoModel: (geminiVideoModel) => set({ geminiVideoModel }),
       setFalTextModel: (falTextModel) => set({ falTextModel }),
       setFalImageModel: (falImageModel) => set({ falImageModel }),
       setFalVideoModel: (falVideoModel) => set({ falVideoModel }),
+      setFalAudioModel: (falAudioModel) => set({ falAudioModel }),
+      setElevenLabsTtsModel: (elevenLabsTtsModel) => set({ elevenLabsTtsModel }),
+      setElevenLabsDefaultVoiceId: (elevenLabsDefaultVoiceId) =>
+        set({ elevenLabsDefaultVoiceId }),
     }),
     {
       name: "vixio-settings",

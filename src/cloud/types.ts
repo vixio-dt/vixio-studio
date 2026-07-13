@@ -43,7 +43,7 @@ export type ManifestAsset = Omit<Asset, "url"> & { driveFileId: string };
 export type WorkspaceManifest = {
   version: 1;
   updatedAt: string;
-  /** The persisted useProjectsStore state (projects, scenes, shots, characters). */
+  /** The persisted useProjectsStore state (projects, scenes, shots, characters, pages, panels, audioTracks). */
   projects: unknown;
   /** assetId -> metadata + Drive file id for the blob. */
   assets: Record<string, ManifestAsset>;

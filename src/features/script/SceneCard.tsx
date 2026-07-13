@@ -1,8 +1,8 @@
 import { Trash } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Button, Dialog, Segmented, Select, TextArea, TextInput } from "@/components/ui";
+import { Badge, Button, Dialog, Segmented, Select, TextArea, TextInput } from "@/components/ui";
 import { TIMES_OF_DAY } from "@/domain/constants";
 import type {
   Character,
@@ -80,9 +80,29 @@ export const SceneCard = ({
   );
   const shotCount = sceneShots.length;
 
-  const commitBody = () => {
-    if (body !== scene.body) updateScene(scene.id, { body });
-  };
+  const bodyDirty = body !== scene.body;
+
+  // Blur alone misses navigation: React can unmount a focused textarea
+  // without ever dispatching blur, which used to drop the last edit. This
+  // ref always holds the latest draft/committed pair so the unmount and
+  // beforeunload flushes below never read a stale closure.
+  const flushStateRef = useRef({ body, sceneId: scene.id, sceneBody: scene.body });
+  useEffect(() => {
+    flushStateRef.current = { body, sceneId: scene.id, sceneBody: scene.body };
+  });
+
+  const flushBody = useCallback(() => {
+    const { body: draft, sceneId, sceneBody } = flushStateRef.current;
+    if (draft !== sceneBody) updateScene(sceneId, { body: draft });
+  }, [updateScene]);
+
+  useEffect(() => {
+    window.addEventListener("beforeunload", flushBody);
+    return () => {
+      window.removeEventListener("beforeunload", flushBody);
+      flushBody();
+    };
+  }, [flushBody]);
 
   const toggleCharacter = (characterId: CharacterId) => {
     const next = scene.characterIds.includes(characterId)
@@ -205,14 +225,19 @@ export const SceneCard = ({
         }
       />
 
-      <TextArea
-        aria-label={copy.bodyAria}
-        placeholder={copy.bodyPlaceholder}
-        className="min-h-40 font-mono text-[13px] leading-relaxed"
-        value={body}
-        onChange={(event) => setBody(event.target.value)}
-        onBlur={commitBody}
-      />
+      <div className="flex flex-col gap-1">
+        <TextArea
+          aria-label={copy.bodyAria}
+          placeholder={copy.bodyPlaceholder}
+          className="min-h-40 font-mono text-[13px] leading-relaxed"
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          onBlur={flushBody}
+        />
+        {bodyDirty ? (
+          <Badge tone="accent">{copy.bodyUnsaved}</Badge>
+        ) : null}
+      </div>
 
       {projectCharacters.length === 0 ? (
         <p className="text-xs text-fg-muted">{copy.noCharacters}</p>
@@ -297,7 +322,7 @@ export const SceneCard = ({
         title={copy.replaceShotsTitle}
       >
         <p className="text-sm text-fg-secondary">
-          {copy.replaceShotsBody(shotCount)}
+          {copy.replaceShotsBody(sceneNumber, shotCount)}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button size="sm" onClick={() => setReplaceOpen(false)}>

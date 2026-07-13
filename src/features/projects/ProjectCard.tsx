@@ -5,9 +5,17 @@ import { Link } from "react-router-dom";
 import { Button, Dialog, MediaFrame, Skeleton } from "@/components/ui";
 import { findVisualStyle, PROJECT_FORMATS } from "@/domain/constants";
 import type { Project } from "@/domain/types";
+import type { AssetId } from "@/lib/id";
+import { removeBlockouts } from "@/lib/previz/blockout";
 import { formatRelativeTime } from "@/lib/time";
 import { useAsset, useAssetsStore } from "@/stores/assets";
-import { selectShotsForProject, useProjectsStore } from "@/stores/projects";
+import {
+  selectAudioTracksForProject,
+  selectCharactersForProject,
+  selectPanelsForProject,
+  selectShotsForProject,
+  useProjectsStore,
+} from "@/stores/projects";
 
 import { projectsCopy } from "./copy";
 
@@ -52,7 +60,53 @@ export const ProjectCard = ({ project }: ProjectCardProps) => {
 
   const confirmDelete = () => {
     setConfirmOpen(false);
+
+    // Gather every asset the project graph references before the store
+    // wipes the scenes, shots, characters, and panels that hold them.
+    const projectsState = useProjectsStore.getState();
+    const shots = selectShotsForProject(
+      projectsState.shots,
+      projectsState.scenes,
+      project.id,
+    );
+    const characters = selectCharactersForProject(
+      projectsState.characters,
+      project.id,
+    );
+    const panels = selectPanelsForProject(
+      projectsState.panels,
+      projectsState.pages,
+      project.id,
+    );
+    const tracks = selectAudioTracksForProject(
+      projectsState.audioTracks,
+      project.id,
+    );
+
+    const assetIds = new Set<AssetId>();
+    if (project.coverAssetId) assetIds.add(project.coverAssetId);
+    for (const shot of shots) {
+      if (shot.frameAssetId) assetIds.add(shot.frameAssetId);
+      if (shot.videoAssetId) assetIds.add(shot.videoAssetId);
+      for (const id of shot.frameHistory) assetIds.add(id);
+      if (shot.previzAssetId) assetIds.add(shot.previzAssetId);
+      if (shot.dialogueAssetId) assetIds.add(shot.dialogueAssetId);
+    }
+    for (const character of characters) {
+      if (character.portraitAssetId) assetIds.add(character.portraitAssetId);
+      for (const id of character.portraitHistory) assetIds.add(id);
+    }
+    for (const panel of panels) {
+      if (panel.imageAssetId) assetIds.add(panel.imageAssetId);
+      for (const id of panel.imageHistory) assetIds.add(id);
+    }
+    for (const track of tracks) {
+      if (track.assetId) assetIds.add(track.assetId);
+    }
+
     deleteProject(project.id);
+    void useAssetsStore.getState().removeAssets([...assetIds]);
+    removeBlockouts(shots.map((shot) => shot.id));
   };
 
   return (

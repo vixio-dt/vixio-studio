@@ -7,7 +7,7 @@ import {
   SpeakerSimpleHigh,
   SpeakerSimpleX,
 } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button, EmptyState } from "@/components/ui";
@@ -15,6 +15,7 @@ import { useActiveProject } from "@/features/shared/useActiveProject";
 import { formatSeconds } from "@/lib/time";
 import { useAssetsStore } from "@/stores/assets";
 import {
+  selectAudioTracksForProject,
   selectCharactersForProject,
   selectScenesForProject,
   selectShotsForProject,
@@ -22,12 +23,10 @@ import {
   useProjectsStore,
 } from "@/stores/projects";
 
+import { AudioLanes } from "./AudioLanes";
+import { ConvertToComic } from "./ConvertToComic";
 import { timelineCopy } from "./copy";
-import {
-  buildCutEntries,
-  elapsedSeconds,
-  totalSeconds,
-} from "./cutLogic";
+import { buildCutEntries, playbackOffsets, playbackTotalSeconds } from "./cutLogic";
 import {
   exportContactSheet,
   exportCutData,
@@ -35,7 +34,8 @@ import {
 } from "./exporters";
 import { Filmstrip } from "./Filmstrip";
 import { PlaybackStage } from "./PlaybackStage";
-import { usePlayback } from "./usePlayback";
+import { RenderPanel } from "./RenderPanel";
+import { usePlayback, type PlaybackMix } from "./usePlayback";
 
 /**
  * The cut: every shot in global script order, hard cuts at scene bounds.
@@ -48,6 +48,7 @@ export const TimelinePage = () => {
   const scenesById = useProjectsStore((state) => state.scenes);
   const shotsById = useProjectsStore((state) => state.shots);
   const charactersById = useProjectsStore((state) => state.characters);
+  const audioTracksById = useProjectsStore((state) => state.audioTracks);
   const assets = useAssetsStore((state) => state.assets);
   const hydrated = useAssetsStore((state) => state.hydrated);
 
@@ -76,6 +77,12 @@ export const TimelinePage = () => {
     [scenes, shotsById],
   );
 
+  const tracks = useMemo(
+    () =>
+      project ? selectAudioTracksForProject(audioTracksById, project.id) : [],
+    [audioTracksById, project],
+  );
+
   const entries = useMemo(
     () => buildCutEntries(shots, scenesById, assets),
     [shots, scenesById, assets],
@@ -85,14 +92,40 @@ export const TimelinePage = () => {
   const timings = useMemo(
     () =>
       entries.map((entry) =>
-        entry.kind === "video"
-          ? entry.playbackSeconds + 2
-          : entry.playbackSeconds,
+        entry.kind === "video" ? entry.seconds + 2 : entry.seconds,
       ),
     [entries],
   );
 
-  const playback = usePlayback(timings);
+  // Preview mix: dialogue clips at their shot offsets, music and ambience
+  // looped behind the whole cut. Playback schedules it through WebAudio.
+  const mix = useMemo((): PlaybackMix => {
+    const offsets = playbackOffsets(entries);
+    const cues = entries.flatMap((entry, position) => {
+      const asset = entry.shot.dialogueAssetId
+        ? assets[entry.shot.dialogueAssetId]
+        : undefined;
+      const at = offsets[position];
+      return asset && asset.url.length > 0 && at !== undefined
+        ? [{ url: asset.url, at }]
+        : [];
+    });
+    const loops = tracks.flatMap((track) => {
+      const asset = track.assetId ? assets[track.assetId] : undefined;
+      return asset && asset.url.length > 0
+        ? [{ id: track.id, url: asset.url, gain: track.gain, muted: track.muted }]
+        : [];
+    });
+    return {
+      cues,
+      loops,
+      offsets,
+      totalSeconds: playbackTotalSeconds(entries),
+      dialogueGain: project?.dialogueGain ?? 1,
+    };
+  }, [entries, tracks, assets, project?.dialogueGain]);
+
+  const playback = usePlayback(timings, mix);
   const [muted, setMuted] = useState(true);
   const [exportingBoard, setExportingBoard] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -117,6 +150,9 @@ export const TimelinePage = () => {
             </Button>
           }
         />
+        <div className="p-4">
+          <ConvertToComic project={project} />
+        </div>
       </div>
     );
   }
@@ -125,8 +161,20 @@ export const TimelinePage = () => {
   const renderedClips = shots.filter(
     (shot) => shot.videoAssetId !== null,
   ).length;
-  const runtime = totalSeconds(entries);
-  const elapsed = elapsedSeconds(entries, playback.index);
+  const runtime = playbackTotalSeconds(entries);
+
+  const handleSeekToFraction = (fraction: number) => {
+    const target = Math.min(runtime, Math.max(0, fraction * runtime));
+    // Nearest entry start at or before the target time; the playback engine
+    // seeks by entry, not by an arbitrary offset within one.
+    let index = 0;
+    for (let position = 0; position < mix.offsets.length; position += 1) {
+      const start = mix.offsets[position] ?? 0;
+      if (start <= target) index = position;
+      else break;
+    }
+    playback.seek(index);
+  };
 
   const handleExportBoard = async () => {
     setExportingBoard(true);
@@ -227,9 +275,15 @@ export const TimelinePage = () => {
             {timelineCopy.transport.shotOf(playback.index + 1, entries.length)}
           </span>
           <span className="text-fg-muted">
-            {formatSeconds(elapsed)} / {formatSeconds(runtime)}
+            {formatSeconds(playback.elapsedSeconds)} / {formatSeconds(runtime)}
           </span>
         </div>
+
+        <PlayheadBar
+          elapsedSeconds={playback.elapsedSeconds}
+          totalSeconds={runtime}
+          onSeekFraction={handleSeekToFraction}
+        />
 
         <div className="-mt-2 flex justify-center">
           <button
@@ -257,7 +311,61 @@ export const TimelinePage = () => {
           currentIndex={playback.index}
           onSeek={playback.seek}
         />
+
+        <AudioLanes
+          project={project}
+          entries={entries}
+          characters={characters}
+          tracks={tracks}
+          totalSeconds={mix.totalSeconds}
+        />
+
+        <RenderPanel
+          project={project}
+          scenes={scenes}
+          shots={shots}
+          assets={assets}
+          tracks={tracks}
+        />
+
+        <ConvertToComic project={project} />
       </div>
     </div>
+  );
+};
+
+type PlayheadBarProps = {
+  elapsedSeconds: number;
+  totalSeconds: number;
+  onSeekFraction: (fraction: number) => void;
+};
+
+/**
+ * The one moving playhead: a thin scrubber spanning the cut, filled to the
+ * elapsed fraction. Reads the same clock the transport text shows, so the
+ * two never disagree. Clicking seeks to the nearest shot at that time.
+ */
+const PlayheadBar = ({
+  elapsedSeconds,
+  totalSeconds,
+  onSeekFraction,
+}: PlayheadBarProps) => {
+  const fraction = totalSeconds > 0 ? Math.min(1, elapsedSeconds / totalSeconds) : 0;
+
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clicked = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+    onSeekFraction(Math.min(1, Math.max(0, clicked)));
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={timelineCopy.transport.scrub}
+      onClick={handleClick}
+      className="-mt-2 h-1.5 w-full shrink-0 bg-ink-hover"
+    >
+      <div className="h-full bg-accent-media" style={{ width: `${fraction * 100}%` }} />
+    </button>
   );
 };

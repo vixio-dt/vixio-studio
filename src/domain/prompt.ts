@@ -1,5 +1,12 @@
-import { findVisualStyle, MOTION_PRESETS } from "./constants";
-import type { Character, Project, Scene, Shot } from "./types";
+import {
+  DEFAULT_COMIC_STYLE_ID,
+  findCameraBody,
+  findCameraPreset,
+  findComicStyle,
+  findVisualStyle,
+  MOTION_PRESETS,
+} from "./constants";
+import type { Character, Panel, Project, Scene, Shot } from "./types";
 
 /**
  * Prompt assembly follows the artcraft principle: the user controls every
@@ -103,13 +110,57 @@ export const composePortraitPrompt = (input: {
   return joinPromptParts(parts);
 };
 
+/**
+ * Panels are generated as clean art; balloons are lettered as an overlay so
+ * the text stays editable, so the prompt forbids baked-in lettering.
+ */
+const PANEL_FRAMING = "clean art, no speech balloons, no text";
+
+export const composePanelPrompt = (input: {
+  project: Project;
+  panel: Panel;
+  characters: Character[];
+}): string => {
+  const { project, panel, characters } = input;
+  const style = findComicStyle(project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID);
+
+  const parts: string[] = ["comic panel illustration", panel.description.trim()];
+
+  const present = characters.filter((character) =>
+    panel.characterIds.includes(character.id),
+  );
+  for (const character of present) {
+    parts.push(describeCharacter(character));
+  }
+
+  parts.push(style.promptFragment);
+  parts.push(PANEL_FRAMING);
+
+  const notes = panel.promptNotes.trim();
+  if (notes.length > 0) parts.push(notes);
+
+  return joinPromptParts(parts);
+};
+
 export const composeVideoPrompt = (input: {
   framePrompt: string;
   shot: Shot;
 }): string => {
+  const { shot } = input;
   const preset = MOTION_PRESETS.find(
-    (candidate) => candidate.movement === input.shot.movement,
+    (candidate) => candidate.movement === shot.movement,
   );
   const motion = preset?.promptFragment ?? "subtle ambient motion";
-  return `${input.framePrompt}. Camera: ${motion}.`;
+
+  const parts: string[] = [input.framePrompt, `Camera: ${motion}`];
+
+  const cameraPreset = shot.cameraPresetId
+    ? findCameraPreset(shot.cameraPresetId)
+    : null;
+  if (cameraPreset) parts.push(`Camera move: ${cameraPreset.promptFragment}`);
+
+  const cameraBody = shot.cameraBodyId ? findCameraBody(shot.cameraBodyId) : null;
+  if (cameraBody) parts.push(cameraBody.promptFragment);
+
+  return `${joinPromptParts(parts)}.`;
 };

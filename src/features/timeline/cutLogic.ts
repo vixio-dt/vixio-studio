@@ -5,9 +5,6 @@ import type { AssetId, SceneId } from "@/lib/id";
 /* Timeline assembly: global shot order, hard cuts at scene bounds     */
 /* ------------------------------------------------------------------ */
 
-/** A shot with nothing rendered plays as a short slate. */
-export const SLATE_SECONDS = 1.5;
-
 export type CutEntryKind = "video" | "image" | "slate";
 
 export type CutEntry = {
@@ -16,10 +13,16 @@ export type CutEntry = {
   videoAsset: Asset | null;
   frameAsset: Asset | null;
   kind: CutEntryKind;
-  /** Timeline length: clip duration when rendered, else the planned shot duration. */
+  /**
+   * Stage length in seconds: the single authoritative duration for this
+   * entry. A rendered clip's real length wins; every other shot (a still
+   * frame or a bare slate) holds its planned board duration, so the
+   * director's pacing survives into playback and the final render. This is
+   * the only duration value for an entry; the transport clock, the
+   * filmstrip, the advance timer, the audio mix schedule, and the final
+   * render all read it.
+   */
   seconds: number;
-  /** Stage length: same as `seconds`, except slates always run 1.5s. */
-  playbackSeconds: number;
   /** First shot of its scene; the filmstrip marks these with a spacer. */
   sceneStart: boolean;
   /** The shot references assets that are not in the store yet. */
@@ -53,6 +56,8 @@ export const buildCutEntries = (
       : frameAsset
         ? "image"
         : "slate";
+    // A rendered clip's real length wins; a still or a bare slate holds its
+    // planned board duration so pacing decisions carry through unchanged.
     const seconds = videoAsset?.duration ?? shot.durationSeconds;
     const sceneStart = shot.sceneId !== previousSceneId;
     previousSceneId = shot.sceneId;
@@ -63,7 +68,6 @@ export const buildCutEntries = (
       frameAsset,
       kind,
       seconds,
-      playbackSeconds: kind === "slate" ? SLATE_SECONDS : seconds,
       sceneStart,
       pendingAssets:
         (shot.videoAssetId !== null && !videoAsset) ||
@@ -72,16 +76,23 @@ export const buildCutEntries = (
   });
 };
 
-export const totalSeconds = (entries: readonly CutEntry[]): number =>
-  entries.reduce((sum, entry) => sum + entry.seconds, 0);
+/**
+ * Stage start offset of each entry in seconds. Drives the transport clock,
+ * the audio mix schedule, and the final render.
+ */
+export const playbackOffsets = (entries: readonly CutEntry[]): number[] => {
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (const entry of entries) {
+    offsets.push(cursor);
+    cursor += entry.seconds;
+  }
+  return offsets;
+};
 
-export const elapsedSeconds = (
-  entries: readonly CutEntry[],
-  currentIndex: number,
-): number =>
-  entries
-    .slice(0, Math.max(0, currentIndex))
-    .reduce((sum, entry) => sum + entry.seconds, 0);
+/** Total stage time of the cut in seconds; the one authoritative runtime. */
+export const playbackTotalSeconds = (entries: readonly CutEntry[]): number =>
+  entries.reduce((sum, entry) => sum + entry.seconds, 0);
 
 /* ------------------------------------------------------------------ */
 /* Formatting                                                          */

@@ -58,6 +58,7 @@ export const scriptCopy = {
 
     bodyAria: "Scene body",
     bodyPlaceholder: "Action lines and dialogue, screenplay style",
+    bodyUnsaved: "Unsaved",
 
     charactersAria: "Characters in scene",
     noCharacters:
@@ -72,8 +73,8 @@ export const scriptCopy = {
     tryAgain: "Try again",
 
     replaceShotsTitle: "Replace shots",
-    replaceShotsBody: (count: number): string =>
-      `This scene already has ${count} ${count === 1 ? "shot" : "shots"}. Breaking it down again replaces them, along with their frames.`,
+    replaceShotsBody: (sceneNumber: number, count: number): string =>
+      `Scene ${sceneNumber} already has ${count} ${count === 1 ? "shot" : "shots"}. Replace them with a fresh breakdown? Frames and clips attached to replaced shots are removed from the board.`,
     replaceShotsConfirm: "Replace",
 
     deleteScene: "Delete scene",

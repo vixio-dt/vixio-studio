@@ -139,17 +139,23 @@ const buildManifest = (): WorkspaceManifest => {
       scenes: projectsState.scenes,
       shots: projectsState.shots,
       characters: projectsState.characters,
+      pages: projectsState.pages,
+      panels: projectsState.panels,
+      audioTracks: projectsState.audioTracks,
     },
     assets: assetIndex,
   };
 };
 
-/** The persisted projects-store shape: the four record maps, nothing else. */
+/** The persisted projects-store shape: the record maps, nothing else. */
 type PersistedProjects = {
   projects: unknown;
   scenes: unknown;
   shots: unknown;
   characters: unknown;
+  pages: unknown;
+  panels: unknown;
+  audioTracks: unknown;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -162,6 +168,9 @@ const readPersistedProjects = (value: unknown): PersistedProjects | null => {
     scenes: isRecord(value["scenes"]) ? value["scenes"] : {},
     shots: isRecord(value["shots"]) ? value["shots"] : {},
     characters: isRecord(value["characters"]) ? value["characters"] : {},
+    pages: isRecord(value["pages"]) ? value["pages"] : {},
+    panels: isRecord(value["panels"]) ? value["panels"] : {},
+    audioTracks: isRecord(value["audioTracks"]) ? value["audioTracks"] : {},
   };
 };
 

@@ -25,6 +25,8 @@ const statusLine = (task: GenerationTask): string => {
 
 const TaskRow = ({ task }: { task: GenerationTask }) => {
   const dismissTask = useTasksStore((state) => state.dismissTask);
+  const cancelQueuedTask = useTasksStore((state) => state.cancelQueuedTask);
+  const queued = task.status.state === "queued";
   const running = task.status.state === "running";
   const failed = task.status.state === "failed";
 
@@ -52,7 +54,16 @@ const TaskRow = ({ task }: { task: GenerationTask }) => {
               {formatRelativeTime(task.createdAt)}
             </span>
           )}
-          {!running && task.status.state !== "queued" ? (
+          {queued ? (
+            <button
+              type="button"
+              aria-label="Cancel queued task"
+              onClick={() => cancelQueuedTask(task.id)}
+              className="flex size-6 items-center justify-center text-fg-muted transition-colors hover:bg-ink-hover hover:text-danger"
+            >
+              <X size={12} aria-hidden />
+            </button>
+          ) : !running ? (
             <button
               type="button"
               aria-label="Dismiss task"

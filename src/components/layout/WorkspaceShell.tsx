@@ -1,18 +1,35 @@
 import {
   Aperture,
+  BookOpen,
+  Cube,
+  Export,
   FilmReel,
   FilmSlate,
   FilmStrip,
   GearSix,
+  PaintBrush,
   Queue,
   SquaresFour,
   UsersThree,
+  type Icon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
-import { Link, NavLink, Outlet, useParams } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
-import { Badge } from "@/components/ui";
-import { findVisualStyle } from "@/domain/constants";
+import { Badge, Segmented } from "@/components/ui";
+import {
+  DEFAULT_COMIC_STYLE_ID,
+  findComicStyle,
+  findVisualStyle,
+} from "@/domain/constants";
+import type { Project, ProjectMode } from "@/domain/types";
 import type { ProjectId } from "@/lib/id";
 import { useProjectsStore } from "@/stores/projects";
 import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
@@ -20,14 +37,35 @@ import { selectActiveTaskCount, useTasksStore } from "@/stores/tasks";
 import { AccountChip } from "./AccountChip";
 import { TaskDrawer } from "./TaskDrawer";
 
-const NAV_ITEMS = [
+type NavItem = { to: string; label: string; icon: Icon };
+
+const FILM_NAV_ITEMS: readonly NavItem[] = [
   { to: "script", label: "Script", icon: FilmSlate },
   { to: "cast", label: "Cast", icon: UsersThree },
   { to: "storyboard", label: "Board", icon: SquaresFour },
+  { to: "previz", label: "Previz", icon: Cube },
   { to: "framelab", label: "Frames", icon: Aperture },
   { to: "motion", label: "Motion", icon: FilmReel },
   { to: "timeline", label: "Cut", icon: FilmStrip },
-] as const;
+];
+
+const COMIC_NAV_ITEMS: readonly NavItem[] = [
+  { to: "script", label: "Script", icon: FilmSlate },
+  { to: "cast", label: "Cast", icon: UsersThree },
+  { to: "pages", label: "Pages", icon: BookOpen },
+  { to: "panels", label: "Panels", icon: PaintBrush },
+  { to: "export", label: "Export", icon: Export },
+];
+
+const styleBadgeLabel = (project: Project): string =>
+  project.mode === "comic"
+    ? findComicStyle(project.comicStyleId ?? DEFAULT_COMIC_STYLE_ID).label
+    : findVisualStyle(project.styleId).name;
+
+const MODE_OPTIONS = [
+  { value: "film", label: "Film", testId: "mode-switch-film" },
+  { value: "comic", label: "Comic", testId: "mode-switch-comic" },
+] as const satisfies readonly { value: ProjectMode; label: string; testId: string }[];
 
 /**
  * Workspace chrome: a 64px icon rail, a slim top bar, and the working canvas.
@@ -36,11 +74,40 @@ const NAV_ITEMS = [
  */
 export const WorkspaceShell = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const project = useProjectsStore((state) =>
     projectId ? (state.projects[projectId as ProjectId] ?? null) : null,
   );
+  const updateProject = useProjectsStore((state) => state.updateProject);
+  const hasShots = useProjectsStore((state) =>
+    projectId
+      ? Object.values(state.shots).some(
+          (shot) => shot.projectId === (projectId as ProjectId),
+        )
+      : false,
+  );
+  const hasPanels = useProjectsStore((state) =>
+    projectId
+      ? Object.values(state.panels).some(
+          (panel) => panel.projectId === (projectId as ProjectId),
+        )
+      : false,
+  );
   const activeTasks = useTasksStore(selectActiveTaskCount);
   const [queueOpen, setQueueOpen] = useState(false);
+
+  // Flip engines without re-converting; leave film-only or comic-only pages
+  // for the target mode's landing view so the rail always matches the canvas.
+  const handleModeChange = (mode: ProjectMode) => {
+    if (!project || mode === project.mode) return;
+    updateProject(project.id, { mode });
+    const items = mode === "comic" ? COMIC_NAV_ITEMS : FILM_NAV_ITEMS;
+    const currentTab = location.pathname.split("/").pop() ?? "";
+    if (!items.some((item) => item.to === currentTab)) {
+      navigate(mode === "comic" ? "pages" : "storyboard");
+    }
+  };
 
   if (!project) {
     return (
@@ -75,10 +142,19 @@ export const WorkspaceShell = () => {
           <h1 className="truncate font-display text-base font-bold tracking-[-0.02em]">
             {project.title}
           </h1>
-          <Badge>{findVisualStyle(project.styleId).name}</Badge>
+          <Badge>{styleBadgeLabel(project)}</Badge>
           <span className="font-mono text-xs text-fg-muted">
             {project.aspectRatio}
           </span>
+          {hasShots && hasPanels ? (
+            <Segmented
+              size="sm"
+              ariaLabel="Engine"
+              options={MODE_OPTIONS}
+              value={project.mode}
+              onChange={handleModeChange}
+            />
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           <AccountChip />
@@ -107,22 +183,25 @@ export const WorkspaceShell = () => {
         aria-label="Workspace"
         className="col-start-1 row-start-2 flex flex-col items-stretch border-r border-line bg-ink-panel pt-2"
       >
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-1 py-3 text-[10px] transition-colors ${
-                isActive
-                  ? "border-r border-accent-media bg-ink-raised text-fg"
-                  : "text-fg-muted hover:bg-ink-hover hover:text-fg-secondary"
-              }`
-            }
-          >
-            <Icon size={20} aria-hidden />
-            {label}
-          </NavLink>
-        ))}
+        {(project.mode === "comic" ? COMIC_NAV_ITEMS : FILM_NAV_ITEMS).map(
+          ({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              data-testid={`nav-${to}`}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-1 py-3 text-[10px] transition-colors ${
+                  isActive
+                    ? "border-r border-accent-media bg-ink-raised text-fg"
+                    : "text-fg-muted hover:bg-ink-hover hover:text-fg-secondary"
+                }`
+              }
+            >
+              <Icon size={20} aria-hidden />
+              {label}
+            </NavLink>
+          ),
+        )}
       </nav>
 
       <main className="col-start-2 row-start-2 min-w-0 overflow-hidden">

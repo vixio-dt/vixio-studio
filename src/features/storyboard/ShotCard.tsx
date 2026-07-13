@@ -9,9 +9,23 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Button, Dialog, MediaFrame, Skeleton } from "@/components/ui";
-import { CAMERA_MOVEMENTS, SHOT_SIZES } from "@/domain/constants";
-import type { Character, Project, Scene, Shot } from "@/domain/types";
+import { Button, Dialog, Field, MediaFrame, Select, Skeleton } from "@/components/ui";
+import {
+  CAMERA_BODIES,
+  CAMERA_MOVEMENTS,
+  CAMERA_PRESETS,
+  findCameraBody,
+  findCameraPreset,
+  SHOT_SIZES,
+} from "@/domain/constants";
+import type {
+  CameraBodyId,
+  CameraPresetId,
+  Character,
+  Project,
+  Scene,
+  Shot,
+} from "@/domain/types";
 import { useAsset, useAssetsStore } from "@/stores/assets";
 import { useProjectsStore } from "@/stores/projects";
 import { useTasksStore } from "@/stores/tasks";
@@ -85,6 +99,7 @@ export const ShotCard = ({
 }: ShotCardProps) => {
   const navigate = useNavigate();
   const deleteShot = useProjectsStore((state) => state.deleteShot);
+  const updateShot = useProjectsStore((state) => state.updateShot);
   const frameAsset = useAsset(shot.frameAssetId);
   const assetsHydrated = useAssetsStore((state) => state.hydrated);
   const tasks = useTasksStore((state) => state.tasks);
@@ -125,6 +140,12 @@ export const ShotCard = ({
 
   const waitingOnHydration =
     shot.frameAssetId !== null && !assetsHydrated && !frameAsset;
+
+  // Mono readout of the camera fragments the video prompt will append.
+  const cameraFragments = [
+    shot.cameraPresetId ? findCameraPreset(shot.cameraPresetId)?.promptFragment : null,
+    shot.cameraBodyId ? findCameraBody(shot.cameraBodyId)?.promptFragment : null,
+  ].filter((fragment): fragment is string => Boolean(fragment));
 
   return (
     <article className="flex w-64 shrink-0 flex-col border border-line bg-ink-panel">
@@ -171,6 +192,63 @@ export const ShotCard = ({
         {shot.dialogue ? (
           <p className="line-clamp-1 text-xs italic text-fg-muted">
             {`"${shot.dialogue}"`}
+          </p>
+        ) : null}
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label={storyboardCopy.camera.presetLabel}>
+            {({ inputId }) => (
+              <Select
+                id={inputId}
+                data-testid={`shot-camera-preset-${globalNumber - 1}`}
+                value={shot.cameraPresetId ?? ""}
+                onChange={(event) =>
+                  updateShot(shot.id, {
+                    cameraPresetId:
+                      event.target.value === ""
+                        ? undefined
+                        : (event.target.value as CameraPresetId),
+                  })
+                }
+              >
+                <option value="">{storyboardCopy.camera.none}</option>
+                {CAMERA_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label={storyboardCopy.camera.bodyLabel}>
+            {({ inputId }) => (
+              <Select
+                id={inputId}
+                data-testid={`shot-camera-body-${globalNumber - 1}`}
+                value={shot.cameraBodyId ?? ""}
+                onChange={(event) =>
+                  updateShot(shot.id, {
+                    cameraBodyId:
+                      event.target.value === ""
+                        ? undefined
+                        : (event.target.value as CameraBodyId),
+                  })
+                }
+              >
+                <option value="">{storyboardCopy.camera.none}</option>
+                {CAMERA_BODIES.map((body) => (
+                  <option key={body.id} value={body.id}>
+                    {body.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </div>
+
+        {cameraFragments.length > 0 ? (
+          <p className="line-clamp-2 font-mono text-[11px] leading-snug text-fg-muted">
+            {cameraFragments.join(". ")}
           </p>
         ) : null}
 

@@ -4,9 +4,11 @@ import type { Asset } from "@/domain/types";
 import type { AssetId } from "@/lib/id";
 
 /**
- * Assets (generated frames and clips) are blobs, far too large for
- * localStorage. They live in IndexedDB; the store holds an in-memory index
- * with object URLs hydrated on boot.
+ * Assets (generated frames, clips, audio, and 3d models) are blobs, far too
+ * large for localStorage. They live in IndexedDB keyed by their original mime
+ * type; the store holds an in-memory index with object URLs hydrated on boot.
+ * Object URLs are kind-agnostic: the same url feeds <img>, <video>, <audio>,
+ * or a model loader depending on Asset.kind.
  */
 
 const DB_NAME = "vixio-studio";
@@ -96,6 +98,8 @@ type AssetsState = {
   hydrate: () => Promise<void>;
   saveAsset: (asset: Omit<Asset, "url">, blob: Blob) => Promise<Asset>;
   removeAsset: (id: AssetId) => Promise<void>;
+  /** Bulk delete, for project deletion cleanup; unknown ids are ignored. */
+  removeAssets: (ids: readonly AssetId[]) => Promise<void>;
   /**
    * Register an asset known only from the Drive manifest. It enters the index
    * with an empty url so references resolve, but no blob is fetched until
@@ -155,6 +159,22 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     });
   },
 
+  removeAssets: async (ids) => {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return;
+    const existingAssets = get().assets;
+    for (const id of unique) {
+      const existing = existingAssets[id];
+      if (existing && isCached(existing)) URL.revokeObjectURL(existing.url);
+    }
+    await Promise.all(unique.map((id) => deleteStoredAsset(id)));
+    set((state) => {
+      const next = { ...state.assets };
+      for (const id of unique) delete next[id];
+      return { assets: next };
+    });
+  },
+
   registerRemoteAsset: (meta) => {
     set((state) => {
       const existing = state.assets[meta.id];
@@ -197,3 +217,23 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
 export const useAsset = (id: AssetId | null): Asset | null =>
   useAssetsStore((state) => (id ? (state.assets[id] ?? null) : null));
+
+/**
+ * Best-effort duration probe for audio blobs whose metadata the browser can
+ * read cheaply (WAV and most encoded formats). Resolves null when the blob
+ * cannot be decoded; callers should prefer the duration a provider reports.
+ */
+export const probeAudioDuration = (blob: Blob): Promise<number | null> =>
+  new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const audio = document.createElement("audio");
+    const finish = (value: number | null): void => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    audio.onloadedmetadata = () =>
+      finish(Number.isFinite(audio.duration) ? audio.duration : null);
+    audio.onerror = () => finish(null);
+    audio.preload = "metadata";
+    audio.src = url;
+  });
