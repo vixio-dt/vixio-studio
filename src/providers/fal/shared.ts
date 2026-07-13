@@ -38,6 +38,10 @@ export const falCopy = {
   startFrameUnreadable: "The start frame could not be prepared for fal.ai.",
   referenceUnreadable: "A reference image could not be prepared for fal.ai.",
   drivingVideoUnreadable: "The driving clip could not be prepared for fal.ai.",
+  drivingModelUnsupported:
+    "The driving video model in settings cannot take a previz clip. Pick a driving capable model.",
+  modelNeedsDrivingClip:
+    "This video model needs a previz driving clip. Capture one in previz and turn on the previz toggle, or pick an image to video model.",
   uploadFailed: (detail: string) =>
     detail.length > 0
       ? `Uploading media to fal.ai storage failed. ${detail}`
@@ -193,14 +197,8 @@ const blobToDataUri = async (blob: Blob): Promise<Result<string>> => {
   }
 };
 
-/** fal image inputs accept a data URI; convert a local blob URL to one. */
-export const urlToDataUri = async (url: string): Promise<Result<string>> => {
-  const blob = await urlToBlob(url);
-  if (!blob.ok) return blob;
-  return blobToDataUri(blob.value);
-};
-
-const urlToBlob = async (url: string): Promise<Result<Blob>> => {
+/** Fetch a local object or data URL into a Blob, mapping failures to Result. */
+export const urlToBlob = async (url: string): Promise<Result<Blob>> => {
   try {
     const response = await fetch(url);
     if (!response.ok) {
@@ -229,11 +227,16 @@ export const uploadToFalStorage = async (input: {
   const apiKey = readFalSettings().apiKey;
   if (apiKey.length === 0) return err(missingKeyError());
 
-  const grant = await falPost(
+  // Some accounts 404 the typed v3 token route; the plain route is the
+  // fallback the live smoke harness verified.
+  let grant = await falPost(
     `${FAL_REST_BASE}/storage/auth/token?storage_type=fal-cdn-v3`,
     apiKey,
     {},
   );
+  if (!grant.ok) {
+    grant = await falPost(`${FAL_REST_BASE}/storage/auth/token`, apiKey, {});
+  }
   if (!grant.ok) return grant;
   const token = isRecord(grant.value) ? asString(grant.value["token"], "") : "";
   const baseUrl = isRecord(grant.value)

@@ -1,4 +1,4 @@
-import { MODEL_REGISTRY } from "@/domain/modelRegistry";
+import { findModel } from "@/domain/modelRegistry";
 import { appError, err, ok } from "@/lib/result";
 
 import type { ImageRequest, ImageProvider, ImageResult } from "../types";
@@ -38,6 +38,10 @@ export const buildImageBody = (
     return {
       prompt: request.prompt,
       aspect_ratio: request.aspectRatio,
+      // The nano-banana schema accepts these too; keeping them preserves the
+      // app's seed-locked reproducibility and single-image contract.
+      num_images: 1,
+      seed: request.seed,
     };
   }
   return {
@@ -70,7 +74,7 @@ export const falImageProvider: ImageProvider = {
     const settings = readFalSettings();
     if (settings.apiKey.length === 0) return err(missingKeyError());
 
-    const entry = MODEL_REGISTRY.find((model) => model.id === settings.imageModel);
+    const entry = findModel(settings.imageModel);
     const maxReferences = entry?.maxReferenceImages ?? 0;
     const references = request.referenceImageUrls.slice(0, maxReferences);
     const useReferences = references.length > 0;
@@ -81,17 +85,19 @@ export const falImageProvider: ImageProvider = {
     const body = buildImageBody(settings.imageModel, request);
     if (useReferences) {
       onProgress(0.05);
-      const imageUrls: string[] = [];
-      for (const [index, url] of references.entries()) {
-        const uploaded = await mediaUrlForFal(url, `reference-${index + 1}.png`);
-        if (!uploaded.ok) {
-          return err(
-            appError("provider-request-failed", falCopy.referenceUnreadable),
-          );
-        }
-        imageUrls.push(uploaded.value);
-      }
-      body["image_urls"] = imageUrls;
+      // Independent uploads; a full nano-banana reference set is fourteen of
+      // them, so they run together. The first failure propagates its own
+      // detail (storage status, missing key) instead of a generic string.
+      const uploads = await Promise.all(
+        references.map((url, index) =>
+          mediaUrlForFal(url, `reference-${index + 1}.png`),
+        ),
+      );
+      const failed = uploads.find((upload) => !upload.ok);
+      if (failed && !failed.ok) return failed;
+      body["image_urls"] = uploads.map((upload) =>
+        upload.ok ? upload.value : "",
+      );
     }
 
     onProgress(0.15);

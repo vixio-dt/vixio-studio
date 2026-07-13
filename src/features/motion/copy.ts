@@ -17,6 +17,8 @@ export const motionCopy = {
   },
   console: {
     cameraMove: "Camera move",
+    presetLeads:
+      "The camera preset from the board leads this shot's prompt. Clear it there to use these moves.",
     duration: "Duration",
     durationOption: (seconds: number) => `${seconds}s`,
     prompt: "Video prompt",

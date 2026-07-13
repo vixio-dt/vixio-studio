@@ -27,6 +27,8 @@ export type ModelInfo = {
   referenceEndpointId?: string;
   /** Video models that follow the camera and motion of a previz clip. */
   supportsDrivingVideo?: boolean;
+  /** Video models that REQUIRE a driving clip; unusable as plain image to video. */
+  drivingOnly?: boolean;
   notes?: string;
 };
 
@@ -183,6 +185,7 @@ export const MODEL_REGISTRY: readonly ModelInfo[] = [
     maxDurationSeconds: 10,
     supportsAudio: false,
     supportsDrivingVideo: true,
+    drivingOnly: true,
     notes: "Transfers the source clip's motion onto a new first frame.",
   },
   {
@@ -194,18 +197,8 @@ export const MODEL_REGISTRY: readonly ModelInfo[] = [
     maxDurationSeconds: 10,
     supportsAudio: false,
     supportsDrivingVideo: true,
+    drivingOnly: true,
     notes: "Restyles a previz clip while keeping its camera and timing.",
-  },
-  {
-    id: "fal-ai/wan-vace-14b",
-    provider: "fal",
-    kind: "video",
-    label: "Wan VACE 14b",
-    aspectRatios: ["16:9", "9:16", "1:1"],
-    maxDurationSeconds: 5,
-    supportsAudio: false,
-    supportsDrivingVideo: true,
-    notes: "Open weights video editing guided by a depth pass of the clip.",
   },
 
   /* ---------------------------- fal audio ---------------------------- */
@@ -252,3 +245,7 @@ export const modelsFor = (
   kind: ModelKind,
 ): readonly ModelInfo[] =>
   MODEL_REGISTRY.filter((model) => model.provider === provider && model.kind === kind);
+
+/** Registry entry for an exact wire id, or null for custom ids. */
+export const findModel = (id: string): ModelInfo | null =>
+  MODEL_REGISTRY.find((model) => model.id === id) ?? null;

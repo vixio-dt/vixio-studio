@@ -282,7 +282,14 @@ export const ShotWorkspace = ({
     if (!aliveRef.current) return;
     const depthUrl = URL.createObjectURL(result.value.depth);
     depthUrlRef.current = depthUrl;
-    setCapture({ state: "done", codec: result.value.codec, depthUrl });
+    setCapture({
+      state: "done",
+      codec: result.value.codec,
+      depthUrl,
+      // The avc-first encoder emits mp4; the download name must match the
+      // container or extension-keyed tools reject the file.
+      depthExtension: result.value.depth.type.includes("mp4") ? "mp4" : "webm",
+    });
   };
 
   /* ---------------------------------------------------------------- */

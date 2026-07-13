@@ -1,4 +1,5 @@
 import { aspectRatioToDimensions } from "@/domain/constants";
+import { findModel } from "@/domain/modelRegistry";
 import { transcodeToMp4 } from "@/lib/media/toMp4";
 import { appError, err, ok, type Result } from "@/lib/result";
 import { sleep } from "@/lib/time";
@@ -18,6 +19,7 @@ import {
   readFalSettings,
   toFalVideoDuration,
   uploadToFalStorage,
+  urlToBlob,
 } from "./shared";
 
 /**
@@ -31,7 +33,9 @@ import {
  */
 
 const POLL_INTERVAL_MS = 4000;
-const MAX_WAIT_MS = 6 * 60 * 1000;
+// Seedance driving jobs can legitimately run past ten minutes; the live
+// smoke harness budgets the same twelve.
+const MAX_WAIT_MS = 12 * 60 * 1000;
 const EXPECTED_MS = 120 * 1000;
 
 /* ------------------------------------------------------------------ */
@@ -70,78 +74,108 @@ const snapVeoSeconds = (requested: number): number => {
  * takes start_image_url and a string duration, seedance reference-to-video
  * takes video_urls/image_urls with an integer duration.
  */
+export type VideoSubmitPlan = {
+  body: Record<string, unknown>;
+  /**
+   * The clip length the wire body actually requests after the family's
+   * snapping or clamping, so asset metadata never lies about duration.
+   */
+  effectiveDurationSeconds: number;
+};
+
 export const buildVideoSubmitBody = (
   modelId: string,
   args: VideoSubmitArgs,
-): Record<string, unknown> => {
+): VideoSubmitPlan => {
   if (modelId.includes("kling-video/v3")) {
+    const seconds = clampInt(args.durationSeconds, 3, 15);
     return {
-      prompt: args.prompt,
-      ...(args.startImageUrl !== null
-        ? { start_image_url: args.startImageUrl }
-        : {}),
-      duration: String(clampInt(args.durationSeconds, 3, 15)),
-      generate_audio: false,
+      body: {
+        prompt: args.prompt,
+        ...(args.startImageUrl !== null
+          ? { start_image_url: args.startImageUrl }
+          : {}),
+        duration: String(seconds),
+        generate_audio: false,
+      },
+      effectiveDurationSeconds: seconds,
     };
   }
   if (modelId.includes("veo3")) {
+    const seconds = snapVeoSeconds(args.durationSeconds);
     return {
-      prompt: args.prompt,
-      ...(args.startImageUrl !== null ? { image_url: args.startImageUrl } : {}),
-      duration: `${snapVeoSeconds(args.durationSeconds)}s`,
+      body: {
+        prompt: args.prompt,
+        ...(args.startImageUrl !== null
+          ? { image_url: args.startImageUrl }
+          : {}),
+        duration: `${seconds}s`,
+        // fal's veo endpoints default audio on; the app runs its own audio
+        // lanes, so picture stays silent unless the user routes audio here.
+        generate_audio: false,
+      },
+      effectiveDurationSeconds: seconds,
     };
   }
   if (modelId.includes("seedance") && modelId.includes("reference-to-video")) {
+    const seconds = clampInt(args.durationSeconds, 4, 12);
     return {
-      prompt: args.prompt,
-      ...(args.drivingVideoUrl !== null
-        ? { video_urls: [args.drivingVideoUrl] }
-        : {}),
-      ...(args.startImageUrl !== null
-        ? { image_urls: [args.startImageUrl] }
-        : {}),
-      duration: clampInt(args.durationSeconds, 4, 12),
-      resolution: "720p",
-      aspect_ratio: args.aspectRatio,
-      generate_audio: false,
+      body: {
+        prompt: args.prompt,
+        ...(args.drivingVideoUrl !== null
+          ? { video_urls: [args.drivingVideoUrl] }
+          : {}),
+        ...(args.startImageUrl !== null
+          ? { image_urls: [args.startImageUrl] }
+          : {}),
+        duration: seconds,
+        resolution: "720p",
+        aspect_ratio: args.aspectRatio,
+        generate_audio: false,
+      },
+      effectiveDurationSeconds: seconds,
     };
   }
   if (modelId.includes("motion-transfer")) {
     return {
-      prompt: args.prompt,
-      ...(args.drivingVideoUrl !== null
-        ? { video_url: args.drivingVideoUrl }
-        : {}),
-      ...(args.startImageUrl !== null
-        ? { first_frame_image_url: args.startImageUrl }
-        : {}),
+      body: {
+        prompt: args.prompt,
+        ...(args.drivingVideoUrl !== null
+          ? { video_url: args.drivingVideoUrl }
+          : {}),
+        ...(args.startImageUrl !== null
+          ? { first_frame_image_url: args.startImageUrl }
+          : {}),
+      },
+      effectiveDurationSeconds: args.durationSeconds,
     };
   }
   if (modelId.includes("video-to-video")) {
     return {
-      prompt: args.prompt,
-      ...(args.drivingVideoUrl !== null
-        ? { video_url: args.drivingVideoUrl }
-        : {}),
-      loras: [],
-    };
-  }
-  if (modelId.includes("wan-vace")) {
-    return {
-      prompt: args.prompt,
-      ...(args.drivingVideoUrl !== null
-        ? { video_url: args.drivingVideoUrl }
-        : {}),
-      task: "depth",
+      body: {
+        prompt: args.prompt,
+        ...(args.drivingVideoUrl !== null
+          ? { video_url: args.drivingVideoUrl }
+          : {}),
+        loras: [],
+      },
+      effectiveDurationSeconds: args.durationSeconds,
     };
   }
   // Kling v1 tiers, legacy ids, and unknown models keep the classic shape.
   return {
-    prompt: args.prompt,
-    ...(args.startImageUrl !== null ? { image_url: args.startImageUrl } : {}),
-    duration: toFalVideoDuration(args.durationSeconds),
+    body: {
+      prompt: args.prompt,
+      ...(args.startImageUrl !== null ? { image_url: args.startImageUrl } : {}),
+      duration: toFalVideoDuration(args.durationSeconds),
+    },
+    effectiveDurationSeconds: toFalVideoDuration(args.durationSeconds) === "10" ? 10 : 5,
   };
 };
+
+/** True when the built body actually carries the driving clip. */
+const bodyCarriesDrivingVideo = (body: Record<string, unknown>): boolean =>
+  "video_url" in body || "video_urls" in body;
 
 /* ------------------------------------------------------------------ */
 /* Driving clip preparation                                            */
@@ -164,22 +198,14 @@ const withSeedanceMentions = (prompt: string, hasStartFrame: boolean): string =>
 
 /** Fetch the local driving clip, re-encode to mp4 if needed, upload to fal. */
 const prepareDrivingVideo = async (url: string): Promise<Result<string>> => {
-  let blob: Blob;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return err(
-        appError("provider-request-failed", falCopy.drivingVideoUnreadable),
-      );
-    }
-    blob = await response.blob();
-  } catch (cause) {
+  const blob = await urlToBlob(url);
+  if (!blob.ok) {
     return err(
-      appError("provider-request-failed", falCopy.drivingVideoUnreadable, cause),
+      appError("provider-request-failed", falCopy.drivingVideoUnreadable),
     );
   }
   // transcodeToMp4 passes mp4 blobs through untouched.
-  const mp4 = await transcodeToMp4(blob);
+  const mp4 = await transcodeToMp4(blob.value);
   if (!mp4.ok) return mp4;
   return uploadToFalStorage({ blob: mp4.value, fileName: "driving.mp4" });
 };
@@ -229,38 +255,60 @@ export const falVideoProvider: VideoProvider = {
     if (!driving && request.startFrameUrl === null) {
       return err(appError("provider-request-failed", falCopy.startFrameRequired));
     }
+    // Driving-only endpoints (motion transfer, vid2vid) hard-require a clip;
+    // refuse the plain image-to-video path up front instead of letting fal
+    // answer 422 after a paid upload.
+    if (!driving && findModel(modelId)?.drivingOnly) {
+      return err(
+        appError("provider-request-failed", falCopy.modelNeedsDrivingClip),
+      );
+    }
 
     onProgress(0.01);
-    let drivingVideoUrl: string | null = null;
-    if (request.drivingVideoUrl !== null) {
-      const prepared = await prepareDrivingVideo(request.drivingVideoUrl);
-      if (!prepared.ok) return prepared;
-      drivingVideoUrl = prepared.value;
-    }
+    // The clip and frame preps are independent network pipelines; run them
+    // together so a driving generation pays the slower of the two, not both.
+    const [preparedClip, preparedFrame] = await Promise.all([
+      request.drivingVideoUrl !== null
+        ? prepareDrivingVideo(request.drivingVideoUrl)
+        : Promise.resolve(null),
+      request.startFrameUrl !== null
+        ? mediaUrlForFal(request.startFrameUrl, "start-frame.png")
+        : Promise.resolve(null),
+    ]);
+    if (preparedClip !== null && !preparedClip.ok) return preparedClip;
+    if (preparedFrame !== null && !preparedFrame.ok) return preparedFrame;
+    const drivingVideoUrl = preparedClip?.value ?? null;
+    const startImageUrl = preparedFrame?.value ?? null;
 
-    let startImageUrl: string | null = null;
-    if (request.startFrameUrl !== null) {
-      const frame = await mediaUrlForFal(request.startFrameUrl, "start-frame.png");
-      if (!frame.ok) return frame;
-      startImageUrl = frame.value;
-    }
+    const seedanceDriving =
+      driving &&
+      modelId.includes("seedance") &&
+      modelId.includes("reference-to-video");
+    const prompt = seedanceDriving
+      ? withSeedanceMentions(request.prompt, startImageUrl !== null)
+      : request.prompt;
 
-    const prompt =
-      driving && modelId.includes("seedance")
-        ? withSeedanceMentions(request.prompt, startImageUrl !== null)
-        : request.prompt;
+    const plan = buildVideoSubmitBody(modelId, {
+      prompt,
+      durationSeconds: request.durationSeconds,
+      aspectRatio: request.aspectRatio,
+      startImageUrl,
+      drivingVideoUrl,
+    });
+    // A driving request whose body cannot carry the clip means the chosen
+    // model id matched no driving-capable family; fail loudly rather than
+    // render an expensive clip that silently ignores the previz camera.
+    if (driving && !bodyCarriesDrivingVideo(plan.body)) {
+      return err(
+        appError("provider-request-failed", falCopy.drivingModelUnsupported),
+      );
+    }
 
     onProgress(0.04);
     const submitted = await falPost(
       `${FAL_QUEUE_BASE}/${modelId}`,
       settings.apiKey,
-      buildVideoSubmitBody(modelId, {
-        prompt,
-        durationSeconds: request.durationSeconds,
-        aspectRatio: request.aspectRatio,
-        startImageUrl,
-        drivingVideoUrl,
-      }),
+      plan.body,
     );
     if (!submitted.ok) return submitted;
 
@@ -273,7 +321,7 @@ export const falVideoProvider: VideoProvider = {
     return pollForVideo({
       handles,
       apiKey: settings.apiKey,
-      durationSeconds: request.durationSeconds,
+      durationSeconds: plan.effectiveDurationSeconds,
       dimensions,
       onProgress,
     });

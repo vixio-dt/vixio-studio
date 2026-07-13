@@ -544,7 +544,9 @@ export const SettingsPage = () => {
               label={settingsCopy.fal.videoModelLabel}
               value={falVideoModel}
               onChange={setFalVideoModel}
-              models={modelsFor("fal", "video")}
+              models={modelsFor("fal", "video").filter(
+                (model) => !model.drivingOnly,
+              )}
               listId="settings-models-fal-video"
             />
             <ModelField

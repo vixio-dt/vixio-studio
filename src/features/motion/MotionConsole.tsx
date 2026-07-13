@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from "react";
 
 import { Button, Segmented, TextArea } from "@/components/ui";
 import { MOTION_PRESETS, VIDEO_DURATIONS } from "@/domain/constants";
-import { MODEL_REGISTRY } from "@/domain/modelRegistry";
+import { findModel } from "@/domain/modelRegistry";
 import { composeFramePrompt, composeVideoPrompt } from "@/domain/prompt";
 import type { Asset, Character, Project, Scene, Shot } from "@/domain/types";
 import type { ShotId } from "@/lib/id";
@@ -73,8 +73,12 @@ export const MotionConsole = ({
         state.geminiApiKey.trim().length === 0),
   );
   const drivingCapable = falConfigured || previewVideoActive;
-  const drivingModelId = useSettingsStore((state) =>
-    state.falDrivingVideoModel.trim(),
+  // Mirror readFalSettings' default fallback so the helper copy names the
+  // model that will actually run when the setting is blank.
+  const drivingModelId = useSettingsStore(
+    (state) =>
+      state.falDrivingVideoModel.trim() ||
+      "bytedance/seedance-2.0/fast/reference-to-video",
   );
 
   const composedPrompt = useMemo(
@@ -103,22 +107,23 @@ export const MotionConsole = ({
   const prompt = draft ?? composedPrompt;
   const promptDirty = draft !== null && draft !== composedPrompt;
 
-  // Off by default per shot; the previz clip only drives generation when the
-  // user opts in and the fal provider can actually consume it.
-  const [previzChoice, setPrevizChoice] = useState<{
-    shotId: ShotId;
-    on: boolean;
-  } | null>(null);
+  // Off by default per shot; a map keyed by shot id so opting in on one shot
+  // never discards another shot's choice. The previz clip only drives
+  // generation when the user opts in and the provider can consume it.
+  const [previzChoice, setPrevizChoice] = useState<
+    Partial<Record<ShotId, boolean>>
+  >({});
+  // Drive-synced placeholders have an empty url until the blob is cached
+  // locally; treat them as not capturable yet.
+  const previzReady = previzAsset !== null && previzAsset.url.length > 0;
   const usePreviz =
-    previzChoice !== null &&
-    previzChoice.shotId === shot.id &&
-    previzChoice.on &&
-    previzAsset !== null &&
-    drivingCapable;
-  const drivingModelLabel = useMemo(() => {
-    const entry = MODEL_REGISTRY.find((model) => model.id === drivingModelId);
-    return entry ? entry.label : drivingModelId;
-  }, [drivingModelId]);
+    previzChoice[shot.id] === true && previzReady && drivingCapable;
+  const drivingModelLabel = useMemo(
+    () => findModel(drivingModelId)?.label ?? drivingModelId,
+    [drivingModelId],
+  );
+
+  const drivingUrl = usePreviz && previzAsset ? previzAsset.url : null;
 
   const handleGenerate = () => {
     if (!frameAsset) return;
@@ -128,7 +133,7 @@ export const MotionConsole = ({
         shot,
         prompt,
         startFrameUrl: frameAsset.url,
-        drivingVideoUrl: usePreviz && previzAsset ? previzAsset.url : null,
+        drivingVideoUrl: drivingUrl,
         globalNumber,
       }),
     );
@@ -140,6 +145,11 @@ export const MotionConsole = ({
         <p className="text-[13px] font-medium text-fg-secondary">
           {motionCopy.console.cameraMove}
         </p>
+        {shot.cameraPresetId ? (
+          <p className="text-xs text-fg-muted">
+            {motionCopy.console.presetLeads}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {MOTION_PRESETS.map((preset) => {
             const selected = shot.movement === preset.movement;
@@ -165,7 +175,7 @@ export const MotionConsole = ({
         </div>
       </div>
 
-      {previzAsset !== null ? (
+      {previzReady ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -177,7 +187,10 @@ export const MotionConsole = ({
                 drivingCapable ? undefined : motionCopy.console.previzNeedsFal
               }
               onClick={() =>
-                setPrevizChoice({ shotId: shot.id, on: !usePreviz })
+                setPrevizChoice((current) => ({
+                  ...current,
+                  [shot.id]: !usePreviz,
+                }))
               }
               className={`h-7 border px-2.5 text-xs transition-colors duration-150 active:scale-[0.98] ${
                 usePreviz

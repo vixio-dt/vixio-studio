@@ -36,8 +36,8 @@ const MESHY_API_KEY =
   (process.env.MESHY_API_KEY ?? "").trim() ||
   "msy_dummy_api_key_for_test_mode_12345678";
 
-const SECRETS = [FAL_KEY, GEMINI_API_KEY, ELEVENLABS_API_KEY].filter(
-  (value) => value.length > 0,
+const SECRETS = [FAL_KEY, GEMINI_API_KEY, ELEVENLABS_API_KEY, MESHY_API_KEY].filter(
+  (value) => value.length > 0 && value !== "msy_dummy_api_key_for_test_mode_12345678",
 );
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -747,6 +747,7 @@ const main = async () => {
   );
 
   let failed = 0;
+  let executed = 0;
   for (const check of selected) {
     if (check.expensive && !args.includeExpensive) {
       console.log(`SKIP  ${check.id.padEnd(20)} expensive, pass --include-expensive`);
@@ -758,6 +759,7 @@ const main = async () => {
       continue;
     }
     const startedAt = Date.now();
+    executed += 1;
     try {
       const outcome = await check.run();
       const elapsed = Date.now() - startedAt;
@@ -776,6 +778,10 @@ const main = async () => {
     }
   }
 
+  if (executed === 0) {
+    console.log("No checks ran. Check --only spelling and --include-expensive.");
+    process.exit(1);
+  }
   if (failed > 0) process.exit(1);
 };
 
