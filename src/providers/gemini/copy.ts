@@ -19,6 +19,8 @@ export const geminiCopy = {
   noImageData: "Gemini returned no image data, try again",
   referenceUnreadable: "A reference image could not be read",
   videoNoOperation: "Veo did not return a generation operation",
+  drivingUnsupported:
+    "Veo cannot use a previz driving clip, switch the video provider to fal.ai",
   videoUnknownError: "no detail provided",
   videoFailed: (detail: string) => `Veo generation failed (${detail})`,
   videoTimedOut: "Veo generation timed out after 8 minutes",

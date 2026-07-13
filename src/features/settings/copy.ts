@@ -62,6 +62,8 @@ export const settingsCopy = {
     textModelHelper: "any-llm model id, for example anthropic/claude-3.5-sonnet.",
     imageModelLabel: "Image model",
     videoModelLabel: "Video model",
+    drivingVideoModelLabel: "Driving video model",
+    drivingVideoModelHelper: "Used when a shot sends a previz driving clip.",
     audioModelLabel: "Audio model",
     audioModelHelper: "Speech model used when audio routes through fal.",
   },

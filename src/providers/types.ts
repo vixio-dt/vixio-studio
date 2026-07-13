@@ -90,6 +90,11 @@ export type VideoRequest = {
   durationSeconds: number;
   /** Start frame; the mock provider animates this image. */
   startFrameUrl: string | null;
+  /**
+   * Previz clip that drives camera and motion. Only fal driving-capable
+   * models consume it; other providers reject or ignore it.
+   */
+  drivingVideoUrl: string | null;
   movement: string;
 };
 

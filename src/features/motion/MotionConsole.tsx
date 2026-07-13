@@ -89,6 +89,7 @@ export const MotionConsole = ({
         shot,
         prompt,
         startFrameUrl: frameAsset.url,
+        drivingVideoUrl: null,
         globalNumber,
       }),
     );

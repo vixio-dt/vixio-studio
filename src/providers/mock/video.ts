@@ -3,7 +3,7 @@ import { createRng } from "@/lib/random";
 import { appError, err, ok } from "@/lib/result";
 
 import type { Result } from "@/lib/result";
-import type { VideoProvider, VideoResult } from "../types";
+import type { VideoProvider, VideoRequest, VideoResult } from "../types";
 
 /**
  * Offline preview animatic. Records a Ken Burns style move over the shot's
@@ -172,11 +172,21 @@ const loadImage = (url: string): Promise<Result<HTMLImageElement>> =>
 /* Provider                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Last request the preview provider received. The animatic itself ignores
+ * driving clips; offline tests read this to assert the plumbing delivered
+ * them intact.
+ */
+export const previewVideoLog: { lastRequest: VideoRequest | null } = {
+  lastRequest: null,
+};
+
 export const previewVideoProvider: VideoProvider = {
   id: "vixio-preview",
   name: "Vixio preview animatic",
 
   generateVideo: async (request, onProgress) => {
+    previewVideoLog.lastRequest = request;
     if (typeof MediaRecorder === "undefined") {
       return err(appError("provider-request-failed", previewVideoCopy.recorderUnsupported));
     }

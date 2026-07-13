@@ -204,6 +204,7 @@ type ModelFieldProps = {
   /** Registry suggestions; the input stays free text either way. */
   models?: readonly ModelInfo[];
   listId?: string;
+  inputTestId?: string;
 };
 
 const ModelField = ({
@@ -213,6 +214,7 @@ const ModelField = ({
   onChange,
   models,
   listId,
+  inputTestId,
 }: ModelFieldProps) => {
   const hasList = models !== undefined && models.length > 0 && listId !== undefined;
   return (
@@ -227,6 +229,7 @@ const ModelField = ({
             aria-describedby={describedBy}
             className="font-mono text-[13px]"
             list={hasList ? listId : undefined}
+            data-testid={inputTestId}
             value={value}
             onChange={(event) => onChange(event.target.value)}
           />
@@ -348,6 +351,9 @@ export const SettingsPage = () => {
   const falTextModel = useSettingsStore((state) => state.falTextModel);
   const falImageModel = useSettingsStore((state) => state.falImageModel);
   const falVideoModel = useSettingsStore((state) => state.falVideoModel);
+  const falDrivingVideoModel = useSettingsStore(
+    (state) => state.falDrivingVideoModel,
+  );
   const falAudioModel = useSettingsStore((state) => state.falAudioModel);
   const elevenLabsApiKey = useSettingsStore((state) => state.elevenLabsApiKey);
   const elevenLabsDefaultVoiceId = useSettingsStore(
@@ -367,6 +373,9 @@ export const SettingsPage = () => {
   const setFalTextModel = useSettingsStore((state) => state.setFalTextModel);
   const setFalImageModel = useSettingsStore((state) => state.setFalImageModel);
   const setFalVideoModel = useSettingsStore((state) => state.setFalVideoModel);
+  const setFalDrivingVideoModel = useSettingsStore(
+    (state) => state.setFalDrivingVideoModel,
+  );
   const setFalAudioModel = useSettingsStore((state) => state.setFalAudioModel);
   const setElevenLabsApiKey = useSettingsStore((state) => state.setElevenLabsApiKey);
   const setElevenLabsDefaultVoiceId = useSettingsStore(
@@ -537,6 +546,17 @@ export const SettingsPage = () => {
               onChange={setFalVideoModel}
               models={modelsFor("fal", "video")}
               listId="settings-models-fal-video"
+            />
+            <ModelField
+              label={settingsCopy.fal.drivingVideoModelLabel}
+              helper={settingsCopy.fal.drivingVideoModelHelper}
+              value={falDrivingVideoModel}
+              onChange={setFalDrivingVideoModel}
+              models={modelsFor("fal", "video").filter(
+                (model) => model.supportsDrivingVideo,
+              )}
+              listId="settings-models-fal-driving"
+              inputTestId="settings-fal-driving-model"
             />
             <ModelField
               label={settingsCopy.fal.audioModelLabel}

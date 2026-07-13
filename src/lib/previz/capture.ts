@@ -2,6 +2,7 @@ import {
   BufferTarget,
   CanvasSource,
   getFirstEncodableVideoCodec,
+  Mp4OutputFormat,
   Output,
   QUALITY_MEDIUM,
   WebMOutputFormat,
@@ -53,7 +54,7 @@ export type CaptureOutput = {
 /* ------------------------------------------------------------------ */
 
 type EncoderChoice =
-  | { kind: "webcodecs"; codec: "vp8" | "vp9"; label: string }
+  | { kind: "webcodecs"; codec: "avc" | "vp8" | "vp9"; label: string }
   | { kind: "recorder"; mimeType: string; label: string };
 
 const RECORDER_MIME_CANDIDATES = [
@@ -65,11 +66,13 @@ const RECORDER_MIME_CANDIDATES = [
 const resolveEncoder = async (): Promise<EncoderChoice | null> => {
   if (typeof VideoEncoder !== "undefined") {
     try {
-      const codec = await getFirstEncodableVideoCodec(["vp9", "vp8"], {
+      // avc first: driving-video models accept mp4 but not webm, so a clip
+      // that is mp4 at the source skips a transcode later.
+      const codec = await getFirstEncodableVideoCodec(["avc", "vp9", "vp8"], {
         width: CAPTURE_WIDTH,
         height: CAPTURE_HEIGHT,
       });
-      if (codec === "vp9" || codec === "vp8") {
+      if (codec === "avc" || codec === "vp9" || codec === "vp8") {
         return { kind: "webcodecs", codec, label: `webcodecs ${codec}` };
       }
     } catch {
@@ -203,11 +206,15 @@ export const captureBlockout = async (input: {
 
   const encodePassWithWebCodecs = async (
     pass: CapturePass,
-    codec: "vp8" | "vp9",
+    codec: "avc" | "vp8" | "vp9",
   ): Promise<Blob> => {
     preparePass(pass);
     const target = new BufferTarget();
-    const output = new Output({ format: new WebMOutputFormat(), target });
+    const mp4 = codec === "avc";
+    const output = new Output({
+      format: mp4 ? new Mp4OutputFormat() : new WebMOutputFormat(),
+      target,
+    });
     const source = new CanvasSource(canvas, { codec, bitrate: QUALITY_MEDIUM });
     output.addVideoTrack(source, { frameRate: CAPTURE_FPS });
     await output.start();
@@ -218,7 +225,7 @@ export const captureBlockout = async (input: {
     }
     await output.finalize();
     if (!target.buffer) throw new Error("Muxing produced no data");
-    return new Blob([target.buffer], { type: "video/webm" });
+    return new Blob([target.buffer], { type: mp4 ? "video/mp4" : "video/webm" });
   };
 
   const encodePassWithRecorder = async (
