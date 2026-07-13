@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from "react";
 
 import { Button, Segmented, TextArea } from "@/components/ui";
 import { MOTION_PRESETS, VIDEO_DURATIONS } from "@/domain/constants";
+import { MODEL_REGISTRY } from "@/domain/modelRegistry";
 import { composeFramePrompt, composeVideoPrompt } from "@/domain/prompt";
 import type { Asset, Character, Project, Scene, Shot } from "@/domain/types";
 import type { ShotId } from "@/lib/id";
@@ -25,6 +26,8 @@ type MotionConsoleProps = {
   /** 1-based position across the whole project, used in task labels. */
   globalNumber: number;
   frameAsset: Asset | null;
+  /** The shot's captured previz clay clip, when one exists. */
+  previzAsset: Asset | null;
   /** A shot-video task for this shot is queued or running. */
   generating: boolean;
   /** Newest failure that is still worth surfacing, or null. */
@@ -43,6 +46,7 @@ export const MotionConsole = ({
   characters,
   globalNumber,
   frameAsset,
+  previzAsset,
   generating,
   failedTask,
 }: MotionConsoleProps) => {
@@ -53,6 +57,24 @@ export const MotionConsole = ({
   const veoConfigured = useSettingsStore(
     (state) =>
       state.videoProvider === "gemini" && state.geminiApiKey.trim().length > 0,
+  );
+  const falConfigured = useSettingsStore(
+    (state) =>
+      state.videoProvider === "fal" && state.falApiKey.trim().length > 0,
+  );
+  // The offline preview accepts a driving clip too (it records the choice
+  // without consuming it), so the loop is testable without a key. Only Veo
+  // rejects driving clips outright.
+  const previewVideoActive = useSettingsStore(
+    (state) =>
+      state.videoProvider === "vixio-preview" ||
+      (state.videoProvider === "fal" && state.falApiKey.trim().length === 0) ||
+      (state.videoProvider === "gemini" &&
+        state.geminiApiKey.trim().length === 0),
+  );
+  const drivingCapable = falConfigured || previewVideoActive;
+  const drivingModelId = useSettingsStore((state) =>
+    state.falDrivingVideoModel.trim(),
   );
 
   const composedPrompt = useMemo(
@@ -81,6 +103,23 @@ export const MotionConsole = ({
   const prompt = draft ?? composedPrompt;
   const promptDirty = draft !== null && draft !== composedPrompt;
 
+  // Off by default per shot; the previz clip only drives generation when the
+  // user opts in and the fal provider can actually consume it.
+  const [previzChoice, setPrevizChoice] = useState<{
+    shotId: ShotId;
+    on: boolean;
+  } | null>(null);
+  const usePreviz =
+    previzChoice !== null &&
+    previzChoice.shotId === shot.id &&
+    previzChoice.on &&
+    previzAsset !== null &&
+    drivingCapable;
+  const drivingModelLabel = useMemo(() => {
+    const entry = MODEL_REGISTRY.find((model) => model.id === drivingModelId);
+    return entry ? entry.label : drivingModelId;
+  }, [drivingModelId]);
+
   const handleGenerate = () => {
     if (!frameAsset) return;
     enqueueVideo(
@@ -89,7 +128,7 @@ export const MotionConsole = ({
         shot,
         prompt,
         startFrameUrl: frameAsset.url,
-        drivingVideoUrl: null,
+        drivingVideoUrl: usePreviz && previzAsset ? previzAsset.url : null,
         globalNumber,
       }),
     );
@@ -125,6 +164,39 @@ export const MotionConsole = ({
           })}
         </div>
       </div>
+
+      {previzAsset !== null ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="motion-use-previz"
+              aria-pressed={usePreviz}
+              disabled={!drivingCapable}
+              title={
+                drivingCapable ? undefined : motionCopy.console.previzNeedsFal
+              }
+              onClick={() =>
+                setPrevizChoice({ shotId: shot.id, on: !usePreviz })
+              }
+              className={`h-7 border px-2.5 text-xs transition-colors duration-150 active:scale-[0.98] ${
+                usePreviz
+                  ? "border-accent-media text-fg"
+                  : "border-line text-fg-muted hover:border-line-strong hover:text-fg-secondary"
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {motionCopy.console.previzToggle}
+            </button>
+            <p className="text-xs text-fg-muted">
+              {falConfigured
+                ? motionCopy.console.previzHelper(drivingModelLabel)
+                : drivingCapable
+                  ? motionCopy.console.previzPreviewNote
+                  : motionCopy.console.previzNeedsFal}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-fg-secondary">

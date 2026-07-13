@@ -33,6 +33,13 @@ export const motionCopy = {
     dismiss: "Dismiss",
     dismissFailed: "Dismiss failed task",
     clipTaskLabel: (shotNumber: number) => `Clip, shot #${shotNumber}`,
+    previzToggle: "Use previz clip",
+    previzHelper: (modelLabel: string) =>
+      `The previz clip drives the camera and motion. Renders with ${modelLabel}.`,
+    previzPreviewNote:
+      "The offline preview keeps your choice. Add a fal key in settings for real driving video.",
+    previzNeedsFal:
+      "Driving video needs the fal.ai provider. Add a fal key and route video to fal in settings.",
   },
   empty: {
     title: "No shots to animate",
