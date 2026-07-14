@@ -13,10 +13,13 @@ import type { AspectRatio } from "@/domain/types";
 
 export const FAL_SYNC_BASE = "https://fal.run";
 export const FAL_QUEUE_BASE = "https://queue.fal.run";
+export const FAL_REST_BASE = "https://rest.alpha.fal.ai";
 
 const DEFAULT_TEXT_MODEL = "google/gemini-flash-1.5";
-const DEFAULT_IMAGE_MODEL = "fal-ai/flux/dev";
-const DEFAULT_VIDEO_MODEL = "fal-ai/kling-video/v1.6/standard/image-to-video";
+const DEFAULT_IMAGE_MODEL = "fal-ai/flux-2";
+const DEFAULT_VIDEO_MODEL = "fal-ai/kling-video/v3/standard/image-to-video";
+const DEFAULT_DRIVING_VIDEO_MODEL =
+  "bytedance/seedance-2.0/fast/reference-to-video";
 
 export const falCopy = {
   missingKey: "Add a fal.ai key in settings to generate with fal.",
@@ -33,6 +36,20 @@ export const falCopy = {
   startFrameRequired:
     "This video model needs a start frame. Generate the shot frame first.",
   startFrameUnreadable: "The start frame could not be prepared for fal.ai.",
+  referenceUnreadable: "A reference image could not be prepared for fal.ai.",
+  drivingVideoUnreadable: "The driving clip could not be prepared for fal.ai.",
+  drivingModelUnsupported:
+    "The driving video model in settings cannot take a previz clip. Pick a driving capable model.",
+  modelNeedsDrivingClip:
+    "This video model needs a previz driving clip. Capture one in previz and turn on the previz toggle, or pick an image to video model.",
+  uploadFailed: (detail: string) =>
+    detail.length > 0
+      ? `Uploading media to fal.ai storage failed. ${detail}`
+      : "Uploading media to fal.ai storage failed.",
+  jobFailed: (detail: string) =>
+    detail.length > 0
+      ? `fal.ai reported the job failed. ${detail}`
+      : "fal.ai reported the job failed.",
   cancelled: "Generation was cancelled.",
   timedOut: "fal.ai did not finish the job in time.",
 } as const;
@@ -42,6 +59,7 @@ export type FalSettings = {
   textModel: string;
   imageModel: string;
   videoModel: string;
+  drivingVideoModel: string;
 };
 
 const orDefault = (value: string, fallback: string): string => {
@@ -57,6 +75,10 @@ export const readFalSettings = (): FalSettings => {
     textModel: orDefault(state.falTextModel, DEFAULT_TEXT_MODEL),
     imageModel: orDefault(state.falImageModel, DEFAULT_IMAGE_MODEL),
     videoModel: orDefault(state.falVideoModel, DEFAULT_VIDEO_MODEL),
+    drivingVideoModel: orDefault(
+      state.falDrivingVideoModel,
+      DEFAULT_DRIVING_VIDEO_MODEL,
+    ),
   };
 };
 
@@ -73,7 +95,8 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const asString = (value: unknown, fallback: string): string =>
   typeof value === "string" ? value : fallback;
 
-const readApiErrorDetail = (payload: unknown): string => {
+/** fal's own error text from an error payload, however it is nested. */
+export const readFalErrorDetail = (payload: unknown): string => {
   if (!isRecord(payload)) return "";
   const detail = payload["detail"];
   if (typeof detail === "string") return detail;
@@ -133,7 +156,7 @@ const falFetch = async (
   if (!response.ok) {
     let detail: string;
     try {
-      detail = readApiErrorDetail(await response.json());
+      detail = readFalErrorDetail(await response.json());
     } catch {
       detail = "";
     }
@@ -156,14 +179,8 @@ const falFetch = async (
 /* Media helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-/** fal image inputs accept a data URI; convert a local blob URL to one. */
-export const urlToDataUri = async (url: string): Promise<Result<string>> => {
+const blobToDataUri = async (blob: Blob): Promise<Result<string>> => {
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return err(appError("provider-request-failed", falCopy.startFrameUnreadable));
-    }
-    const blob = await response.blob();
     const dataUri = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () =>
@@ -178,6 +195,119 @@ export const urlToDataUri = async (url: string): Promise<Result<string>> => {
   } catch (cause) {
     return err(appError("provider-request-failed", falCopy.startFrameUnreadable, cause));
   }
+};
+
+/** Fetch a local object or data URL into a Blob, mapping failures to Result. */
+export const urlToBlob = async (url: string): Promise<Result<Blob>> => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return err(appError("provider-request-failed", falCopy.startFrameUnreadable));
+    }
+    return ok(await response.blob());
+  } catch (cause) {
+    return err(appError("provider-request-failed", falCopy.startFrameUnreadable, cause));
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* fal storage                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Upload a blob to fal's CDN storage and return its public access URL.
+ * Two steps, both verified against the live API: a short-lived upload token
+ * from rest.alpha.fal.ai (key auth), then a raw-bytes POST to the token's
+ * base_url (bearer auth) which answers { access_url }.
+ */
+export const uploadToFalStorage = async (input: {
+  blob: Blob;
+  fileName: string;
+}): Promise<Result<string>> => {
+  const apiKey = readFalSettings().apiKey;
+  if (apiKey.length === 0) return err(missingKeyError());
+
+  // Some accounts 404 the typed v3 token route; the plain route is the
+  // fallback the live smoke harness verified.
+  let grant = await falPost(
+    `${FAL_REST_BASE}/storage/auth/token?storage_type=fal-cdn-v3`,
+    apiKey,
+    {},
+  );
+  if (!grant.ok) {
+    grant = await falPost(`${FAL_REST_BASE}/storage/auth/token`, apiKey, {});
+  }
+  if (!grant.ok) return grant;
+  const token = isRecord(grant.value) ? asString(grant.value["token"], "") : "";
+  const baseUrl = isRecord(grant.value)
+    ? asString(grant.value["base_url"], "")
+    : "";
+  if (token.length === 0 || baseUrl.length === 0) {
+    return err(appError("provider-response-invalid", falCopy.uploadFailed("")));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/files/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type":
+          input.blob.type.length > 0 ? input.blob.type : "application/octet-stream",
+        "X-Fal-File-Name": input.fileName,
+      },
+      body: input.blob,
+    });
+  } catch (cause) {
+    return err(
+      appError(
+        "provider-request-failed",
+        falCopy.uploadFailed(messageFromUnknown(cause)),
+        cause,
+      ),
+    );
+  }
+  if (!response.ok) {
+    return err(
+      appError(
+        "provider-request-failed",
+        falCopy.uploadFailed(`Status ${response.status}.`),
+      ),
+    );
+  }
+
+  try {
+    const payload = (await response.json()) as unknown;
+    const accessUrl = isRecord(payload)
+      ? asString(payload["access_url"], "")
+      : "";
+    if (accessUrl.length === 0) {
+      return err(appError("provider-response-invalid", falCopy.uploadFailed("")));
+    }
+    return ok(accessUrl);
+  } catch (cause) {
+    return err(
+      appError("provider-response-invalid", falCopy.uploadFailed(""), cause),
+    );
+  }
+};
+
+/**
+ * Turn a local object or data URL into something fal model inputs accept:
+ * a CDN access URL when the storage upload succeeds. Images fall back to the
+ * data-URI path on upload failure (fal image inputs accept those); videos
+ * propagate the error because queue submits reject inline video payloads.
+ */
+export const mediaUrlForFal = async (
+  url: string,
+  fileName: string,
+): Promise<Result<string>> => {
+  const blob = await urlToBlob(url);
+  if (!blob.ok) return blob;
+  const uploaded = await uploadToFalStorage({ blob: blob.value, fileName });
+  if (uploaded.ok) return uploaded;
+  if (blob.value.type.startsWith("image/")) return blobToDataUri(blob.value);
+  return uploaded;
 };
 
 /**

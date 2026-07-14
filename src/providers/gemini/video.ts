@@ -150,6 +150,11 @@ export const geminiVideoProvider: VideoProvider = {
     try {
       const settings = readGeminiSettings();
       if (settings.apiKey.length === 0) return err(missingKeyError());
+      if (request.drivingVideoUrl !== null) {
+        return err(
+          appError("provider-request-failed", geminiCopy.drivingUnsupported),
+        );
+      }
 
       const mapped = mapAspect(request.aspectRatio);
       const durationSeconds = snapDuration(request.durationSeconds);

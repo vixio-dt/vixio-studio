@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 test-results
 playwright-report
+
+# Local keys for the live smoke harness; never commit key material
+.env*

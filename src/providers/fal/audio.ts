@@ -22,7 +22,9 @@ import {
 
 const DEFAULT_AUDIO_MODEL = "fal-ai/elevenlabs/tts/eleven-v3";
 const MUSIC_MODEL = "fal-ai/elevenlabs/music";
-const SOUND_EFFECTS_MODEL = "fal-ai/elevenlabs/sound-effects";
+// Live finding 2026-07-13: the unversioned sound-effects endpoint 400s (it
+// pins the retired upstream model eleven_text_to_sound_v0); /v2 works.
+const SOUND_EFFECTS_MODEL = "fal-ai/elevenlabs/sound-effects/v2";
 
 const MIN_MUSIC_MS = 10_000;
 const MAX_MUSIC_MS = 300_000;
@@ -114,11 +116,18 @@ export const falAudioProvider: AudioProvider = {
     const settings = readFalSettings();
     if (settings.apiKey.length === 0) return err(missingKeyError());
 
+    // The fal ElevenLabs TTS endpoints take a voice name or id in `voice`
+    // (verified live); when the request has none the endpoint's default holds.
+    const voiceId = request.voiceId?.trim() ?? "";
+
     onProgress(0.15);
     const response = await falPost(
       `${FAL_SYNC_BASE}/${readAudioModel()}`,
       settings.apiKey,
-      { text: request.text },
+      {
+        text: request.text,
+        ...(voiceId.length > 0 ? { voice: voiceId } : {}),
+      },
     );
     if (!response.ok) return response;
 

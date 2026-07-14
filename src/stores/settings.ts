@@ -25,6 +25,18 @@ const DEFAULT_GOOGLE_CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ??
   "157133855208-4lf5c8tqrq8tbi8bgoa8iujv40oacjhv.apps.googleusercontent.com";
 
+/**
+ * Persist version 1 retired these defaults. The migration rewrites exactly
+ * these strings, so a deliberately chosen custom model id is never touched.
+ */
+const LEGACY_FAL_IMAGE_MODEL = "fal-ai/flux/dev";
+const LEGACY_FAL_VIDEO_MODEL = "fal-ai/kling-video/v1.6/standard/image-to-video";
+
+const DEFAULT_FAL_IMAGE_MODEL = "fal-ai/flux-2";
+const DEFAULT_FAL_VIDEO_MODEL = "fal-ai/kling-video/v3/standard/image-to-video";
+const DEFAULT_FAL_DRIVING_VIDEO_MODEL =
+  "bytedance/seedance-2.0/fast/reference-to-video";
+
 type SettingsState = {
   geminiApiKey: string;
   falApiKey: string;
@@ -41,6 +53,8 @@ type SettingsState = {
   falTextModel: string;
   falImageModel: string;
   falVideoModel: string;
+  /** Used instead of falVideoModel when a shot sends a driving clip. */
+  falDrivingVideoModel: string;
   falAudioModel: string;
   elevenLabsTtsModel: string;
   /** Used when a speech request carries no voice id (Rachel by default). */
@@ -60,6 +74,7 @@ type SettingsState = {
   setFalTextModel: (model: string) => void;
   setFalImageModel: (model: string) => void;
   setFalVideoModel: (model: string) => void;
+  setFalDrivingVideoModel: (model: string) => void;
   setFalAudioModel: (model: string) => void;
   setElevenLabsTtsModel: (model: string) => void;
   setElevenLabsDefaultVoiceId: (voiceId: string) => void;
@@ -81,8 +96,9 @@ export const useSettingsStore = create<SettingsState>()(
       geminiImageModel: "gemini-2.5-flash-image",
       geminiVideoModel: "veo-3.1-fast-generate-001",
       falTextModel: "google/gemini-flash-1.5",
-      falImageModel: "fal-ai/flux/dev",
-      falVideoModel: "fal-ai/kling-video/v1.6/standard/image-to-video",
+      falImageModel: DEFAULT_FAL_IMAGE_MODEL,
+      falVideoModel: DEFAULT_FAL_VIDEO_MODEL,
+      falDrivingVideoModel: DEFAULT_FAL_DRIVING_VIDEO_MODEL,
       falAudioModel: "fal-ai/elevenlabs/tts/eleven-v3",
       elevenLabsTtsModel: "eleven_multilingual_v2",
       elevenLabsDefaultVoiceId: "21m00Tcm4TlvDq8ikWAM",
@@ -101,6 +117,8 @@ export const useSettingsStore = create<SettingsState>()(
       setFalTextModel: (falTextModel) => set({ falTextModel }),
       setFalImageModel: (falImageModel) => set({ falImageModel }),
       setFalVideoModel: (falVideoModel) => set({ falVideoModel }),
+      setFalDrivingVideoModel: (falDrivingVideoModel) =>
+        set({ falDrivingVideoModel }),
       setFalAudioModel: (falAudioModel) => set({ falAudioModel }),
       setElevenLabsTtsModel: (elevenLabsTtsModel) => set({ elevenLabsTtsModel }),
       setElevenLabsDefaultVoiceId: (elevenLabsDefaultVoiceId) =>
@@ -108,6 +126,22 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "vixio-settings",
+      version: 1,
+      // Version 0 shipped fal defaults that have since been retired provider
+      // side. Rewrite exactly the old default strings to the new defaults and
+      // leave every user-chosen model id alone.
+      migrate: (persisted, version) => {
+        const saved = { ...((persisted ?? {}) as Partial<SettingsState>) };
+        if (version < 1) {
+          if (saved.falImageModel === LEGACY_FAL_IMAGE_MODEL) {
+            saved.falImageModel = DEFAULT_FAL_IMAGE_MODEL;
+          }
+          if (saved.falVideoModel === LEGACY_FAL_VIDEO_MODEL) {
+            saved.falVideoModel = DEFAULT_FAL_VIDEO_MODEL;
+          }
+        }
+        return saved as SettingsState;
+      },
       // A browser that persisted settings before the client id shipped would
       // hold an empty string; don't let that mask the shipped default. Keep an
       // explicitly-set custom id, otherwise fall back to the current default.

@@ -88,6 +88,7 @@ export const MotionPage = () => {
 
   const frameAsset = useAsset(selectedShot?.frameAssetId ?? null);
   const videoAsset = useAsset(selectedShot?.videoAssetId ?? null);
+  const previzAsset = useAsset(selectedShot?.previzAssetId ?? null);
 
   const activeTask = useMemo(
     () => (selectedShot ? findActiveClipTask(tasks, selectedShot.id) : null),
@@ -164,6 +165,7 @@ export const MotionPage = () => {
               characters={characters}
               globalNumber={globalNumber}
               frameAsset={frameAsset}
+              previzAsset={previzAsset}
               generating={activeTask !== null}
               failedTask={failedTask}
             />

@@ -73,6 +73,7 @@ export type ClipTaskInput = {
     seed: number;
     durationSeconds: number;
     startFrameUrl: string | null;
+    drivingVideoUrl: string | null;
     movement: string;
   };
 };
@@ -82,6 +83,7 @@ export const buildClipTask = (input: {
   shot: Shot;
   prompt: string;
   startFrameUrl: string | null;
+  drivingVideoUrl: string | null;
   globalNumber: number;
 }): ClipTaskInput => ({
   project: input.project,
@@ -93,6 +95,7 @@ export const buildClipTask = (input: {
     seed: input.shot.seed,
     durationSeconds: input.shot.durationSeconds,
     startFrameUrl: input.startFrameUrl,
+    drivingVideoUrl: input.drivingVideoUrl,
     movement: input.shot.movement,
   },
 });

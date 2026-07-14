@@ -11,7 +11,7 @@ export type CaptureStatus =
   | { state: "rendering"; pass: CapturePass; fraction: number }
   | { state: "saving" }
   | { state: "failed"; message: string }
-  | { state: "done"; codec: string; depthUrl: string };
+  | { state: "done"; codec: string; depthUrl: string; depthExtension: string };
 
 export const isCapturing = (status: CaptureStatus): boolean =>
   status.state === "rendering" || status.state === "saving";

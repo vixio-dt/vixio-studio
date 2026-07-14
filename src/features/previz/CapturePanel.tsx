@@ -140,7 +140,7 @@ export const CapturePanel = ({
         {status.state === "done" ? (
           <a
             href={status.depthUrl}
-            download={`shot-${shotNumber}-depth.webm`}
+            download={`shot-${shotNumber}-depth.${status.depthExtension}`}
             className="inline-flex h-8 items-center border border-line-strong px-3 text-[13px] text-fg transition-colors duration-150 hover:bg-ink-hover"
           >
             {copy.downloadDepth}

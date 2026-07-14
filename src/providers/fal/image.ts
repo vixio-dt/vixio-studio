@@ -1,6 +1,7 @@
-import { appError, err, messageFromUnknown, ok } from "@/lib/result";
+import { findModel } from "@/domain/modelRegistry";
+import { appError, err, ok } from "@/lib/result";
 
-import type { ImageProvider, ImageResult } from "../types";
+import type { ImageRequest, ImageProvider, ImageResult } from "../types";
 import {
   asString,
   aspectToFalImageSize,
@@ -8,16 +9,49 @@ import {
   FAL_SYNC_BASE,
   falPost,
   isRecord,
+  mediaUrlForFal,
   missingKeyError,
   readFalSettings,
 } from "./shared";
 
 /**
- * Image generation over fal's synchronous endpoint (Flux and similar). The
- * composed prompt already carries the character appearance, so this is a
- * text-to-image call; reference images are a model-specific follow-up and are
- * not sent here. fal returns a CDN URL the task queue fetches into a blob.
+ * Image generation over fal's synchronous endpoint. Text-to-image goes to the
+ * configured model directly. When the request carries reference images and
+ * the registry says the model accepts them, the call routes to the model's
+ * reference endpoint (usually the /edit sibling) with the references uploaded
+ * to fal storage and sent as image_urls. Models without registry reference
+ * support keep dropping references, since their endpoints would reject the
+ * field. fal returns a CDN URL the task queue fetches into a blob.
  */
+
+/**
+ * The JSON body a fal image model family expects, keyed off the model id.
+ * Pure so the wire contract is testable without a network. The nano-banana
+ * family takes aspect_ratio and rejects the flux-style size and safety
+ * fields; flux, seedream, and unknown models take the classic flux shape.
+ */
+export const buildImageBody = (
+  modelId: string,
+  request: ImageRequest,
+): Record<string, unknown> => {
+  if (modelId.includes("nano-banana")) {
+    return {
+      prompt: request.prompt,
+      aspect_ratio: request.aspectRatio,
+      // The nano-banana schema accepts these too; keeping them preserves the
+      // app's seed-locked reproducibility and single-image contract.
+      num_images: 1,
+      seed: request.seed,
+    };
+  }
+  return {
+    prompt: request.prompt,
+    image_size: aspectToFalImageSize(request.aspectRatio),
+    num_images: 1,
+    seed: request.seed,
+    enable_safety_checker: false,
+  };
+};
 
 const readFirstImage = (payload: unknown): ImageResult | null => {
   if (!isRecord(payload)) return null;
@@ -40,17 +74,37 @@ export const falImageProvider: ImageProvider = {
     const settings = readFalSettings();
     if (settings.apiKey.length === 0) return err(missingKeyError());
 
+    const entry = findModel(settings.imageModel);
+    const maxReferences = entry?.maxReferenceImages ?? 0;
+    const references = request.referenceImageUrls.slice(0, maxReferences);
+    const useReferences = references.length > 0;
+    const wireModel = useReferences
+      ? (entry?.referenceEndpointId ?? settings.imageModel)
+      : settings.imageModel;
+
+    const body = buildImageBody(settings.imageModel, request);
+    if (useReferences) {
+      onProgress(0.05);
+      // Independent uploads; a full nano-banana reference set is fourteen of
+      // them, so they run together. The first failure propagates its own
+      // detail (storage status, missing key) instead of a generic string.
+      const uploads = await Promise.all(
+        references.map((url, index) =>
+          mediaUrlForFal(url, `reference-${index + 1}.png`),
+        ),
+      );
+      const failed = uploads.find((upload) => !upload.ok);
+      if (failed && !failed.ok) return failed;
+      body["image_urls"] = uploads.map((upload) =>
+        upload.ok ? upload.value : "",
+      );
+    }
+
     onProgress(0.15);
     const response = await falPost(
-      `${FAL_SYNC_BASE}/${settings.imageModel}`,
+      `${FAL_SYNC_BASE}/${wireModel}`,
       settings.apiKey,
-      {
-        prompt: request.prompt,
-        image_size: aspectToFalImageSize(request.aspectRatio),
-        num_images: 1,
-        seed: request.seed,
-        enable_safety_checker: false,
-      },
+      body,
     );
     if (!response.ok) return response;
 
@@ -59,12 +113,6 @@ export const falImageProvider: ImageProvider = {
     if (image === null) {
       return err(appError("provider-response-invalid", falCopy.noImage));
     }
-    try {
-      return ok(image);
-    } catch (cause) {
-      return err(
-        appError("provider-request-failed", messageFromUnknown(cause), cause),
-      );
-    }
+    return ok(image);
   },
 };

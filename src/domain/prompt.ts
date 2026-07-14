@@ -147,17 +147,20 @@ export const composeVideoPrompt = (input: {
   shot: Shot;
 }): string => {
   const { shot } = input;
-  const preset = MOTION_PRESETS.find(
-    (candidate) => candidate.movement === shot.movement,
-  );
-  const motion = preset?.promptFragment ?? "subtle ambient motion";
-
-  const parts: string[] = [input.framePrompt, `Camera: ${motion}`];
-
+  // One camera voice per prompt: a chosen camera preset speaks for the shot;
+  // the coarser movement fragment only fills in when no preset is set.
   const cameraPreset = shot.cameraPresetId
     ? findCameraPreset(shot.cameraPresetId)
     : null;
-  if (cameraPreset) parts.push(`Camera move: ${cameraPreset.promptFragment}`);
+  const preset = MOTION_PRESETS.find(
+    (candidate) => candidate.movement === shot.movement,
+  );
+  const motion =
+    cameraPreset?.promptFragment ??
+    preset?.promptFragment ??
+    "subtle ambient motion";
+
+  const parts: string[] = [input.framePrompt, `Camera: ${motion}`];
 
   const cameraBody = shot.cameraBodyId ? findCameraBody(shot.cameraBodyId) : null;
   if (cameraBody) parts.push(cameraBody.promptFragment);
