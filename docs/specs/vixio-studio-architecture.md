@@ -31,15 +31,14 @@ From the HTH handoff and the content-model spec:
 │  │  byte-exact, CJK-safe       │  repos + worktrees          │
 │  ├ wiki: parsed canon/script   ├ parser: content-model       │
 │  │  views (read), per-entity   │  entities from bytes        │
-│  ├ chat: co-writer w/ diff     ├ agent runtime: OpenAI-      │
-│  │  approval UI                │  compatible client          │
-│  └ production: compile,        │  (Poe API default, Kimi     │
-│     manifest, job status       │  alternate; BYO url+key)    │
+│  ├ chat: co-writer w/ diff     ├ agent runtime: Claude Agent │
+│  │  approval UI                │  SDK → claude CLI (sub-     │
+│  └ production: compile,        │  scription auth); Poe/Kimi  │
+│     manifest, job status       │  OpenAI-compatible fallback │
 │                                ├ compiler: five-block +      │
 │                                │  invariants + guardrails    │
-│                                └ higgsfield: MCP client →    │
-│                                   mcp.higgsfield.ai (OAuth,  │
-│                                   token stored server-side)  │
+│                                └ higgsfield: reached by the  │
+│                                   agent's own MCP client     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,17 +48,34 @@ From the HTH handoff and the content-model spec:
 - **Project store**: each project = a git repo cloned on the VPS with a remote (GitHub). Reads are byte-oriented; writes go through a single `commitEdit` path that (1) applies the change, (2) re-parses affected entities, (3) runs the verbatim-integrity checks, (4) commits with a descriptive message, (5) pushes. Deterministic path-derived IDs (`canon:{slug}`, `script:ep0:p{page}:g{panel}` …), never random.
 - **Parser service**: implements `hth-content-model.md` §2 exactly — page-header regex, panel fields 畫/白/音/註, CORE/NEGATIVE/VARIANT block markers, section splitting on 23×U+2501, the documented hazards (no-blank-line block merges, `PAPER LOTUS LANTERN:` vs `CORE BLOCK:` ambiguity, unsorted 待決 ordinals preserved in file order).
 
-### 3.2 Agent runtime (the co-writer)
+### 3.2 Agent runtime (the co-writer) — Claude Code as the engine
 
-- **Protocol**: OpenAI-compatible chat completions with tool calling. Default provider **Poe API** (`https://api.poe.com/v1`) — the author's Poe subscription exposes Claude, GPT, Gemini and more through one key, with tool calling supported on the major models. Alternate provider **Kimi/Moonshot** (author has a Kimi plan; K2 tool calling is native). Provider is a per-project setting: base URL + key + model name; no Anthropic API key required anywhere.
-- **Tools exposed to the model**: `read_doc(id, range?)`, `search(project, query)`, `list_entities(kind)`, `propose_edit(doc, diff, rationale)`, `propose_new_file(path, purpose)` (which *asks*, never writes). No direct write tool exists — `propose_edit` creates a pending diff the author reviews in the UI; approval triggers `commitEdit`.
-- **Doctrine in the system prompt**: division of labor (author: plot/characters/dialogue; agent: paneling, layout, continuity, file maintenance), proposal labeling (〔提案〕 conventions), Cantonese written-form normalization only (甘→咁, 距→佢, D→啲, 左→咗 … never word-choice changes), version-header bumping, honest pushback.
-- **Chat threads** are persisted per document/entity so a conversation about page 12 stays anchored to page 12.
+The backend does not implement an agent loop. It **drives Claude Code itself** through the Agent SDK (`@anthropic-ai/claude-agent-sdk`, verified v0.3.220 against `claude` CLI v2.1.220), pointed at the project's git worktree. Claude Code is the co-writer; the app is its UI and its warden.
+
+Why this beats a hand-rolled OpenAI-compatible client:
+
+- **Authentication matches what the author owns.** `claude setup-token` mints a long-lived OAuth token for a Pro/Max subscription; the backend passes it as `CLAUDE_CODE_OAUTH_TOKEN`. No Anthropic API key, no per-token billing.
+- **Higgsfield stops being a special case.** The agent has a real MCP client. Servers arrive either as claude.ai connectors (automatically available when Claude Code is logged into the author's account) or explicitly via `mcpServers: { higgsfield: { type: "http", url, headers } }` / `claude mcp add --transport http`, with OAuth completed once through `/mcp` and the credential persisted in the system keychain or credentials file. The earlier "MCP is session-bound to Claude, so generation can't live in the app" problem disappears — the app *is* a Claude session.
+- **Approval is enforced by the harness, not by the model's cooperation.** The agent uses the real `Edit`/`Write` tools; every call lands in the backend's `canUseTool(request, { signal }) => { allow: true } | { allow: false, reason }` callback, which renders the proposed change as a diff in the UI and resolves only on the author's decision. Nothing is written by good behaviour — it is written because a human clicked approve. Run with `permissionMode: 'default'` and an `allowedTools` list covering read-only tools only.
+- **The doctrine is already written and already loads.** The content repo's `CLAUDE.md` (division of labor, 〔提案〕 labeling, Cantonese written-form normalization only, ASCII filenames, version-header bumps, no new files without asking) is picked up automatically from `cwd`. One source of rules for the app agent and for terminal sessions. App-specific additions go through `systemPrompt: { type: 'preset', preset: 'claude_code', append: … }`. Do **not** pass `--bare`: it skips CLAUDE.md, MCP, hooks, and keychain reads — the opposite of what this needs.
+- **Guardrails become deterministic.** `PreToolUse` hooks run before a tool executes: block writes touching never-ship sections, run the verbatim-integrity check on the affected byte ranges, refuse a generation call whose manifest row was not written first. A hook denial is code, not persuasion — which is exactly what guardrail families a–d demand.
+- **Threads resume natively.** `sessionId` / `resume` (and `forkSession` to branch an exploration) give one durable conversation per document or entity; the app stores the session id next to the doc. Session lookup is scoped to the project directory, so each project's worktree is its own thread space.
+- **Streaming for free** via the SDK's message stream (or `--output-format stream-json --include-partial-messages` at the CLI), including `parent_tool_use_id` so subagent work can be shown nested in the UI.
+
+**Operational shape.** Process-per-session, supervised by the backend — there is no long-running Claude Code daemon with a stable local API today, so the app owns the lifecycle: spawn on first message, resume by id thereafter, SIGTERM to cancel (Claude Code aborts the turn, runs `SessionEnd` hooks, exits 143). Fine for a single-user host.
+
+**Known costs, stated plainly.**
+
+1. App usage draws on the same subscription quota as the author's interactive Claude Code work. Heavy automated passes can eat into the sessions they actually want.
+2. `claude setup-token` needs a browser once and the token needs manual rotation; expiry is not documented, so the backend must surface `authentication_failed` from the `api_retry` event stream as a clear "re-auth needed" state rather than a silent stall.
+3. Whether claude.ai connectors (the author's existing Higgsfield authorization) resolve in a token-authenticated headless run is the one thing to verify on the VPS first. Fallback if not: add Higgsfield as an explicit HTTP MCP server and authorize it once with `/mcp` on that host.
+
+**Secondary provider, retained.** A thin OpenAI-compatible client (**Poe API** `https://api.poe.com/v1`, or **Kimi/Moonshot**) stays in the design for work that should not spend subscription quota: bulk mechanical passes (batch normalization checks, parse-diff summaries, embedding/search), parallel fan-out, and as a degraded mode if the OAuth token lapses mid-session. Per-project setting: base URL + key + model. It never gets write access — the `canUseTool` gate is Claude-Code-side, so any Poe/Kimi path is read-and-suggest only.
 
 ### 3.3 Production pipeline (stage 2)
 
 - **Compiler**: pure function from `(entity ids, shot spec)` → five-block prompt (STYLE LOCK → CONTINUITY → DIRECTION → SHOT → NEGATIVE), assembled from byte slices, asserting invariants I1–I13 before returning. A prompt that fails an assertion is unbuildable, not warn-and-continue.
-- **Higgsfield client**: backend MCP client speaking to `mcp.higgsfield.ai` (remote MCP, OAuth; one interactive authorization stores the token server-side). Default model `seedream_v5_pro` @ 2k, `nano_banana_pro` fallback on filter refusals — fallback switches *model*, never softens *text* (guardrail a). Reference images only via `attach_own_anchor` (guardrail b). Jobs recorded in the write-ahead manifest (guardrail d) before dispatch; statuses polled and reconciled into `03_output/manifest.csv` in the content repo.
+- **Higgsfield access**: through the agent's own MCP client (§3.2), not a separate backend integration. The compiler hands the agent an already-assembled, already-asserted prompt and the agent calls `generate_image` / `job_display`. Default model `seedream_v5_pro` @ 2k, `nano_banana_pro` fallback on filter refusals — the fallback switches *model*, never softens *text* (guardrail a), and a `PreToolUse` hook enforces that by comparing the outgoing prompt's verbatim spans against their pinned hashes and denying the call on any drift. Reference images only via `attach_own_anchor` (guardrail b). The same hook refuses a generation tool call whose manifest row was not written first (guardrail d). Statuses are polled and reconciled into `03_output/manifest.csv` in the content repo.
 - **Stage state machine** (guardrail c): per-character `anchor-pending → anchor-approved → element-registered`; per-set similarly; panel generation refuses until its dependencies are green. First production milestone: the nine character anchors (Higgsfield account currently has 0 Elements, 0 characters).
 
 ### 3.4 Frontend
@@ -75,12 +91,13 @@ Because the repo is the interface, the author's existing Claude subscription kee
 
 ## 4. Deployment
 
-Single `docker compose` on the VPS: `app` (backend serving the built SPA), `caddy` (TLS + basic auth or Tailscale-only binding). Secrets (`POE_API_KEY`, `KIMI_API_KEY`, Higgsfield OAuth token, GitHub deploy key) live in an env file on the VPS, never in git. Backups are just git remotes — the content is already on GitHub; SQLite state is disposable except the approvals log, which is also mirrored into commit messages.
+Single `docker compose` on the VPS: `app` (backend serving the built SPA, with the `claude` CLI installed in the image), `caddy` (TLS + basic auth or Tailscale-only binding). Secrets — `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, optional `POE_API_KEY` / `KIMI_API_KEY`, GitHub deploy key — live in an env file on the VPS, never in git. The MCP OAuth credential store (`~/.claude.json` plus the keychain/credentials file) must be on a mounted volume so a container rebuild doesn't force re-authorizing Higgsfield. Backups are just git remotes — the content is already on GitHub; SQLite state is disposable except the approvals log, which is also mirrored into commit messages.
 
 ## 5. Milestones
 
+- **M0 — spike (half a day, before anything else)**: on the VPS, `claude setup-token` → headless `claude -p` run with `--output-format stream-json` → confirm (a) subscription auth works non-interactively, (b) Higgsfield tools are reachable in that run (connector inheritance, or explicit `claude mcp add` + one `/mcp` authorization), (c) a `canUseTool` callback intercepts an `Edit` and can deny it. If (b) fails both ways, the Higgsfield half of §3.3 falls back to Claude Code sessions and the rest of the design is unaffected.
 - **M1 — read**: project registry, parser, wiki views over howl-to-heaven, byte-exact round-trip proven by golden-file tests (parse → serialize → byte-compare over every file in the repo).
-- **M2 — write**: editor + `commitEdit` path + version-header tooling; co-writer chat with `propose_edit` approval flow on Poe/Kimi.
+- **M2 — write**: editor + `commitEdit` path + version-header tooling; co-writer chat driving Claude Code with the `canUseTool` diff-approval gate and `PreToolUse` guardrail hooks.
 - **M3 — compile**: five-block compiler with invariant tests (including the four historical failure cases as regression fixtures); compile preview UI.
 - **M4 — generate**: Higgsfield OAuth + anchor workflow + manifest reconciliation; nine character anchors produced and approved.
 
