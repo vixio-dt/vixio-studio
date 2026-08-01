@@ -192,17 +192,49 @@ export interface CommitEditInput {
 
 export type CommitEditResult =
   | { status: "conflict"; currentSha256: string }
+  | { status: "unchanged"; sha256: string }
   | { status: "committed"; commitSha: string; newSha256: string };
+
+/**
+ * Write serialization: all commitEdit calls for the same project run one at
+ * a time, so the sha-check → write → commit sequence can't interleave with
+ * another edit's (in this process; a multi-process deployment would need a
+ * repo-level lock instead).
+ */
+const projectWriteChains = new Map<string, Promise<unknown>>();
+
+const withProjectWriteLock = async <T>(
+  projectId: string,
+  work: () => Promise<T>,
+): Promise<T> => {
+  const previous = projectWriteChains.get(projectId) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  // Keep the chain alive regardless of this run's outcome.
+  projectWriteChains.set(
+    projectId,
+    run.catch(() => undefined),
+  );
+  return run;
+};
 
 /**
  * The byte-exact write path:
  *  1. read the current bytes;
  *  2. if their SHA-256 differs from baseSha256 → conflict, nothing written;
- *  3. write newBytes exactly as given;
- *  4. `git add` + `git commit` (argv arrays, cwd = project checkout);
- *  5. on commit failure, best-effort restore of the previous bytes.
+ *  3. if newBytes are identical to the current bytes → unchanged, no commit;
+ *  4. write newBytes exactly as given;
+ *  5. `git add` + `git commit` (argv arrays, cwd = project checkout);
+ *  6. on commit failure, best-effort restore of the previous bytes.
+ * The whole sequence holds the project's write lock.
  */
 export async function commitEdit(
+  project: ProjectConfig,
+  input: CommitEditInput,
+): Promise<CommitEditResult> {
+  return withProjectWriteLock(project.id, () => commitEditLocked(project, input));
+}
+
+async function commitEditLocked(
   project: ProjectConfig,
   input: CommitEditInput,
 ): Promise<CommitEditResult> {
@@ -224,6 +256,11 @@ export async function commitEdit(
   }
 
   const newSha256 = sha256Hex(newBytes);
+  if (newSha256 === currentSha256) {
+    // Identical bytes: nothing to write, and `git commit` would fail with
+    // "nothing to commit" — report a graceful no-op instead.
+    return { status: "unchanged", sha256: currentSha256 };
+  }
   await writeFile(resolved.absPath, newBytes);
   try {
     await runGit(project, ["add", "--", resolved.relPath]);

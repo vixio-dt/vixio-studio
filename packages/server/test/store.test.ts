@@ -151,6 +151,57 @@ describe("commitEdit", () => {
     expect(status.trim()).toBe("");
   });
 
+  it("returns unchanged (no commit) when newBytes equal current bytes", async () => {
+    const before = await readDoc(fx.project, CJK_DOC_PATH);
+    const headBefore = (await fx.git("rev-parse", "HEAD")).trim();
+
+    const result = await commitEdit(fx.project, {
+      relPath: CJK_DOC_PATH,
+      baseSha256: before.sha256,
+      newBytes: before.bytes,
+      message: "no-op edit",
+    });
+
+    expect(result).toEqual({ status: "unchanged", sha256: before.sha256 });
+    const headAfter = (await fx.git("rev-parse", "HEAD")).trim();
+    expect(headAfter).toBe(headBefore);
+  });
+
+  it("serializes concurrent edits: exactly one commits, the other conflicts", async () => {
+    const before = await readDoc(fx.project, CJK_DOC_PATH);
+    const editA = Buffer.from(NEW_TEXT + "A\n", "utf8");
+    const editB = Buffer.from(NEW_TEXT + "B\n", "utf8");
+
+    const [a, b] = await Promise.all([
+      commitEdit(fx.project, {
+        relPath: CJK_DOC_PATH,
+        baseSha256: before.sha256,
+        newBytes: editA,
+        message: "concurrent A",
+      }),
+      commitEdit(fx.project, {
+        relPath: CJK_DOC_PATH,
+        baseSha256: before.sha256,
+        newBytes: editB,
+        message: "concurrent B",
+      }),
+    ]);
+
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual(["committed", "conflict"]);
+
+    // The losing edit saw the winner's sha as the conflict target, and the
+    // file on disk is exactly the winner's bytes.
+    const winner = a.status === "committed" ? a : b;
+    const loser = a.status === "conflict" ? a : b;
+    if (winner.status !== "committed" || loser.status !== "conflict") {
+      throw new Error("unreachable");
+    }
+    expect(loser.currentSha256).toBe(winner.newSha256);
+    const onDisk = await readFile(path.join(fx.repo, CJK_DOC_PATH));
+    expect(sha256Hex(onDisk)).toBe(winner.newSha256);
+  });
+
   it("returns conflict and leaves the file untouched on stale baseSha256", async () => {
     const before = await readDoc(fx.project, CJK_DOC_PATH);
     const staleSha = sha256Hex(Buffer.from("some other base content", "utf8"));
