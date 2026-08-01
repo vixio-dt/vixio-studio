@@ -6,7 +6,7 @@ import {
   assertVerbatim,
   checkRequiredSubstrings,
   compilePanelPrompt,
-  DEFAULT_PINS,
+
   sha256Hex,
   type CastMemberInput,
   type CompileInput,
@@ -136,7 +136,11 @@ describe("compilePanelPrompt — happy path", () => {
     expect(result.blocks[1]).toBe(
       `${PINNED_CORE}\n\n${input.set!.raw}\n\n${input.colorRules!}`,
     );
-    expect(result.blocks[2]).toBe(input.direction.join("\n"));
+    // DIRECTION closes with the aspect directive so the compiled ratio is
+    // present in the outbound bytes (spec §3.2).
+    expect(result.blocks[2]).toBe(`${input.direction.join("\n")}\nAspect ratio 4:3.`);
+    expect(result.aspectRatio).toBe("4:3");
+    expect(result.prompt).toContain("Aspect ratio 4:3.");
     expect(result.blocks[3]).toBe(input.shot);
     expect(result.blocks[4]).toBe("no adult proportions, no beard, no fixture armor");
   });
@@ -228,6 +232,65 @@ describe("core-drift — the softening guard (guardrail a)", () => {
   });
 });
 
+describe("stage-text-only tests content, not object identity (guardrail c)", () => {
+  const textOnly = (set: CompileInput["set"]): CompileInput => {
+    const input = baseInput();
+    input.cast = [];
+    input.set = set;
+    return input;
+  };
+
+  it("refuses an empty, blank, or payload-less set the same as a null one", () => {
+    expect(slugsOf(compile(textOnly(null)))).toContain("stage-text-only");
+    expect(slugsOf(compile(textOnly({ name: "", raw: "" })))).toContain("stage-text-only");
+    expect(slugsOf(compile(textOnly({ name: "X", raw: "   " })))).toContain("stage-text-only");
+    // An object with no raw at all (untyped caller).
+    expect(slugsOf(compile(textOnly({ name: "X" } as never)))).toContain("stage-text-only");
+  });
+
+  it("refuses when every cast member's CORE is blank", () => {
+    const input = baseInput();
+    input.set = null;
+    input.cast = [member({ coreRaw: "   " })];
+    expect(slugsOf(compile(input))).toContain("stage-text-only");
+  });
+
+  it("allows a set-only panel when the set actually has content", () => {
+    const input = textOnly({ name: "FIXTURE STAGE", raw: "An empty timber stage at dusk." });
+    expect(compile(input).ok).toBe(true);
+  });
+});
+
+describe("softening-denylist (guardrail a, DIRECTION and SHOT)", () => {
+  it("refuses age re-description in DIRECTION or SHOT", () => {
+    const inDirection = baseInput();
+    inDirection.direction = ["age-neutral adult framing", "low angle"];
+    expect(slugsOf(compile(inDirection))).toContain("softening-denylist");
+
+    const inShot = baseInput();
+    inShot.shot = "The slight young performer, an adult in silhouette, lands mid-stage.";
+    expect(slugsOf(compile(inShot))).toContain("softening-denylist");
+  });
+
+  it("does not fire on the legitimate NEGATIVE phrasing 'no adult proportions'", () => {
+    // The real per-character NEGATIVE says exactly this; CONTINUITY and
+    // NEGATIVE are outside the scan for precisely this reason.
+    expect(compile(baseInput()).ok).toBe(true);
+  });
+});
+
+describe("malformed input yields refusals, not crashes", () => {
+  it("refuses a non-array cast or direction instead of throwing", () => {
+    const badCast = baseInput();
+    (badCast as { cast: unknown }).cast = null;
+    expect(slugsOf(compile(badCast))).toContain("input-malformed");
+
+    const badDirection = baseInput();
+    (badDirection as { direction: unknown }).direction = "a single string";
+    expect(slugsOf(compile(badDirection))).toContain("input-malformed");
+  });
+});
+
 describe("per-member integrity", () => {
   it("refuses an empty coreRaw (core-empty)", () => {
     const input = baseInput();
@@ -308,7 +371,7 @@ describe("franchise-denylist (I4)", () => {
     input.direction = ["kaisen-grade impact frames", "low angle"];
     const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
-    expect(refusals[0]!.message).toContain("across a block boundary");
+    expect(refusals[0]!.message).toContain("split across a line or block boundary");
 
     // The same straddle across SHOT → NEGATIVE.
     const input2 = baseInput();
@@ -316,6 +379,57 @@ describe("franchise-denylist (I4)", () => {
     input2.cast = [member({ negativeRaw: "slayer tropes, no watermark" })];
     const refusals2 = expectRefused(compile(input2));
     expect(refusals2.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
+  });
+
+  it("refuses CJK terms split by a block join or a line wrap (stripped-buffer scan)", () => {
+    // CJK patterns carry no \s+ tolerance, so the whole-buffer scan alone
+    // does not catch them: these all emitted before the stripped scan.
+    const cases: Array<[string, (input: CompileInput) => void]> = [
+      [
+        "咒術 / 回戰 across CONTINUITY → DIRECTION",
+        (input) => {
+          input.colorRules = "配色參考咒術";
+          input.direction = ["回戰式構圖"];
+        },
+      ],
+      [
+        "鬼 / 滅 across SHOT → NEGATIVE",
+        (input) => {
+          input.shot = "少年抬頭望向鬼";
+          input.cast = [member({ negativeRaw: "滅式構圖，no watermark" })];
+        },
+      ],
+      [
+        "咒術回戰 line-wrapped inside a single field",
+        (input) => {
+          input.shot = "牆上海報寫住咒術\n回戰。";
+        },
+      ],
+      [
+        "呪術廻戦 across CONTINUITY → DIRECTION",
+        (input) => {
+          input.colorRules = "海報：呪術";
+          input.direction = ["廻戦風格"];
+        },
+      ],
+    ];
+    for (const [label, mutate] of cases) {
+      const input = baseInput();
+      mutate(input);
+      const slugs = slugsOf(compile(input));
+      expect(slugs, label).toContain("franchise-denylist");
+    }
+  });
+
+  it("does not false-positive on the real 'bleached' clause", () => {
+    // The actual XIAOTIAN CORE contains "now bleached to dusty rose"; the
+    // stripped scan must not turn that into a Bleach hit.
+    const input = baseInput();
+    input.set = {
+      name: "FIXTURE STAGE",
+      raw: "A faded banner, once vermilion, now bleached to dusty rose.",
+    };
+    expect(compile(input).ok).toBe(true);
   });
 
   it("refuses a Latin franchise name in the SHOT block, case-insensitively", () => {

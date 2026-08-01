@@ -81,6 +81,52 @@ gets file-read tools.
 
 ---
 
+## Q6. How should the pin table be mechanically enforced across two repos?
+
+**Where:** `packages/compiler/src/pins.ts`, `packages/compiler/test/pins.test.ts`,
+`scripts/verify-canon.mjs`.
+
+**Today:** the pins are correct and independently verified against
+`howl-to-heaven@e7aa5c6`, but the oracle that proves it is env-gated
+(`HTH_REPO_PATH`) and CI never sets it — canon is a *different repository*, so
+CI has nothing to hash. `npm run verify:canon` is the operator's gate.
+
+**Tension:** spec I9 says a pin mismatch "fails the **build**, not the
+generation". Right now a canon edit that lands without a pin update is caught
+only by a human remembering to run the script.
+
+**Options:** (a) CI job that checks out howl-to-heaven with a deploy key and
+runs the oracle — mechanical, but puts canon in CI logs and needs a secret;
+(b) commit only the *hashes* of canon into this repo (already done — that IS
+pins.ts) and accept that drift detection is operational; (c) move the check to
+a pre-generation hook on the VPS, so nothing can generate against stale pins
+even if CI never sees it. (c) composes well with the PreToolUse hook design.
+Recommend (c) + keep (b). Needs a ruling because it decides whether canon
+bytes ever touch CI infrastructure.
+
+---
+
+## Q7. Should the softening denylist be broader?
+
+**Where:** `packages/compiler/src/compile.ts` SOFTENING_DENYLIST.
+
+**Today:** eight phrases (`age-neutral`, `an adult`, `young adult`, `aged up`,
+…) scanned in DIRECTION and SHOT only.
+
+**Tension:** the list is necessarily incomplete — softening is a semantic act,
+and a phrase list catches only the obvious forms. Scanning CONTINUITY/NEGATIVE
+is impossible with age vocabulary because the real NEGATIVE says "no adult
+proportions". A model-based check would catch more but adds a dependency and a
+false-refusal risk on legitimate prose.
+
+**Decision needed:** is a phrase list the right ceiling here, or should the
+SHOT text be pinned too (i.e. `shot_approved` + a hash, so any post-approval
+edit to the shot re-enters review)? The latter is stronger and needs no
+vocabulary at all — it would make this denylist a backstop rather than the
+primary guard. Recommend pinning approved shots; noting rather than deciding.
+
+---
+
 ## Q5. Multi-process write locking
 
 **Where:** `packages/server/src/store.ts` `commitEdit`.

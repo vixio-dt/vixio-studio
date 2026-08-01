@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseDesignDoc, readSource } from "@vixio/content-model";
 
 import { compilePanelPrompt, sha256Hex, type CompileInput } from "../src/compile.ts";
-import { CORE_PINS, STYLE_LOCK_SHA256 } from "../src/pins.ts";
+import { CORE_PINS, CORE_VARIANT_PINS, STYLE_LOCK_SHA256 } from "../src/pins.ts";
 
 /**
  * The pin table is the reviewed-constant half of the no-softening guardrail
@@ -67,6 +67,34 @@ describe.skipIf(!HTH)("pins match the real repo (update pins.ts in the same comm
       computed[character.nameLiteral] = sha256Hex(core!.payloadRaw);
     }
     expect(computed).toEqual({ ...CORE_PINS });
+  });
+
+  it("CORE_VARIANT_PINS equals the hash of every VARIANT payload", () => {
+    const doc = parseDesignDoc(
+      readSource(readFileSync(`${HTH}/02_art/character-design-prompts.txt`)),
+    );
+    const computed: Record<string, Record<string, string>> = {};
+    for (const character of doc.characters) {
+      for (const block of character.subBlocks) {
+        if (block.kind !== "variant") continue;
+        const forCharacter = (computed[character.nameLiteral] ??= {});
+        forCharacter[block.label] = sha256Hex(block.payloadRaw);
+      }
+    }
+    expect(computed).toEqual(
+      JSON.parse(JSON.stringify(CORE_VARIANT_PINS)) as Record<
+        string,
+        Record<string, string>
+      >,
+    );
+  });
+
+  it("the page-39 TRUE FORM variant is pinned, so the climax panel can compile", () => {
+    const trueForm = Object.entries(CORE_VARIANT_PINS["XIAOTIAN"] ?? {}).find(([label]) =>
+      label.includes("TRUE FORM"),
+    );
+    expect(trueForm).toBeDefined();
+    expect(trueForm![1]).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("STYLE_LOCK_SHA256 equals the frozen quoted block in the pipeline spec", () => {

@@ -19,6 +19,12 @@ import {
   readDoc,
 } from "./store.ts";
 import { buildDocView, redactNeverShip, type DocView } from "./views.ts";
+import {
+  compilePanelFromDocs,
+  parseCompileRequest,
+  DESIGN_DOC_PATH,
+  SCRIPT_DOC_PATH,
+} from "./resolve.ts";
 
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 // Strict base64: full quartets with canonical padding. Buffer.from(_, "base64")
@@ -161,6 +167,46 @@ export async function createApp(configPath?: string): Promise<Hono> {
       return c.json(result, 409);
     }
     return c.json(result);
+  });
+
+  /**
+   * The resolution phase (./resolve.ts) plus the five-block compiler. The
+   * per-panel facts that live in no file today (§2.5) arrive in the body as
+   * panelIndexEntry + registry; the design and script documents are read from
+   * the project checkout. Fail-closed: a refusing compile is 422 with the
+   * refusal list and NO prompt — the two never appear together.
+   */
+  app.post("/api/projects/:id/compile", async (c) => {
+    const project = byId.get(c.req.param("id"));
+    if (!project) return jsonError(c, 404, "unknown project");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return jsonError(c, 400, "request body must be valid JSON");
+    }
+    const request = parseCompileRequest(body);
+    if (!request.ok) return jsonError(c, 400, request.message);
+
+    const design = await readDoc(project, DESIGN_DOC_PATH);
+    const script = await readDoc(project, SCRIPT_DOC_PATH);
+
+    let result: ReturnType<typeof compilePanelFromDocs>;
+    try {
+      result = compilePanelFromDocs({
+        designBytes: design.bytes,
+        scriptBytes: script.bytes,
+        request: request.value,
+      });
+    } catch (err) {
+      // A source document exists but does not parse — the file's fault.
+      return jsonError(c, 422, err instanceof Error ? err.message : String(err));
+    }
+    if (!result.ok) {
+      return c.json({ ok: false, refusals: result.refusals }, 422);
+    }
+    return c.json({ ok: true, prompt: result.prompt, blocks: result.blocks });
   });
 
   return app;

@@ -7,6 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:pins": "vitest run test/pins.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

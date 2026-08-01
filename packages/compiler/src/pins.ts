@@ -20,6 +20,34 @@
 export const STYLE_LOCK_SHA256 =
   "7239206521e1bbb7f957de1a3bfb206ab3e8166048fbc32dcd43d18920fe55d6";
 
+/**
+ * sha256 of each character's VARIANT payloads, keyed by design-doc name then
+ * by the variant's literal label. A variant REPLACES the ordinary CORE for
+ * the panels it governs (XIAOTIAN's TRUE FORM on page 39 is the author-ruled
+ * case), so it needs its own reviewed pin — otherwise the climax panel is
+ * uncompilable and the only "fix" would be weakening the pin check.
+ */
+export const CORE_VARIANT_PINS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "XIAOTIAN": {
+    "VARIANT — SEALED-EYE FLICKER (specified panels only)":
+      "16d6c20196ffe406d69f41c24e36d7c23a812263eebc29ff2d161254ff2d6eeb",
+    "VARIANT — TRUE FORM (FREEZE-FRAME ONLY; Episode Zero page 39; this\nblock REPLACES the standard Xiaotian CORE and NEGATIVE on this one\npanel, author ruling, open-questions 15-2/15-3)":
+      "fa590a3ed0ae906a7bdd5a66d8b921d4a4bb20ef700c96e45a4cc33c4c377836",
+  },
+  "SHENGTIAN": {
+    "VARIANT — STREET CLOTHES":
+      "5dfa04768917fad82c0e7eedd8d1f59ff4ff0aadb20e796735ee0cda2af12d8f",
+  },
+  "THE WOMAN": {
+    "VARIANT — DEMON STATE":
+      "6f48a7f004ef9baa818eb40b0e89438ebc55a6d941ace4a15a1865cfc1eaf5f3",
+  },
+  "THE ENFORCER": {
+    "VARIANT — POSSESSED STATE":
+      "122ee1cce656ba75360619815281e0c2de0d8cbfed10dc293dd102b78a1f9a62",
+  },
+};
+
 /** sha256 of each character's CORE BLOCK payload, keyed by design-doc name. */
 export const CORE_PINS: Readonly<Record<string, string>> = {
   "XIAOTIAN": "8514be796aed3862a108d36ff8cfbabc4ac3f2b9f59e0b66db9bd24d8f205136",

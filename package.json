@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b && npm run typecheck --workspaces --if-present",
     "test:unit": "npm run test --workspaces --if-present",
+    "verify:canon": "node scripts/verify-canon.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

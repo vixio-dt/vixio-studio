@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "@vixio/compiler": "*",
     "@vixio/content-model": "*",
     "hono": "^4.6.0"
   },
