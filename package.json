@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test:unit": "npm run test --workspace=@vixio/content-model",
+    "test:unit": "npm run test --workspaces",
     "test:e2e": "playwright test"
   },
   "dependencies": {
