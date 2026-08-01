@@ -24,6 +24,10 @@ jobs:
       # Kept separate from build (which also runs tsc -b) for a clearer
       # failure signal; the extra run is cheap.
       - run: npm run typecheck
+      # Workspace unit tests (content-model parsers run their synthetic
+      # hazard fixtures here; the canon oracle suites are env-gated and
+      # skip in CI where no howl-to-heaven checkout exists).
+      - run: npm run test:unit
       - run: npm run build
       - run: npx playwright install chromium --with-deps
       - run: npm run test:e2e
