@@ -82,7 +82,7 @@ export async function loadProjects(explicitPath?: string): Promise<ProjectConfig
     text = await readFile(file, "utf8");
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`cannot read projects file ${file}: ${reason}`);
+    throw new Error(`cannot read projects file ${file}: ${reason}`, { cause: err });
   }
   let raw: unknown;
   try {

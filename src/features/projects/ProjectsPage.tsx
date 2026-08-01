@@ -1,4 +1,4 @@
-import { FilmSlate, GearSix, Plus } from "@phosphor-icons/react";
+import { Books, FilmSlate, GearSix, Plus } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -43,6 +43,14 @@ export const ProjectsPage = () => {
           </div>
           <div className="flex items-center gap-1">
             <AccountChip />
+            <Link
+              to="/library"
+              data-testid="library-nav"
+              className="flex h-9 items-center gap-2 px-3 text-sm text-fg-secondary transition-colors duration-150 hover:bg-ink-hover hover:text-fg"
+            >
+              <Books size={18} aria-hidden />
+              Library
+            </Link>
             <Link
               to="/settings"
               className="flex h-9 items-center gap-2 px-3 text-sm text-fg-secondary transition-colors duration-150 hover:bg-ink-hover hover:text-fg"

@@ -50,7 +50,10 @@ async function runGit(project: ProjectConfig, args: readonly string[]): Promise<
     });
     return stdout;
   } catch (err) {
-    throw new Error(`git ${args[0] ?? ""} failed in project "${project.id}": ${errorMessage(err)}`);
+    throw new Error(
+      `git ${args[0] ?? ""} failed in project "${project.id}": ${errorMessage(err)}`,
+      { cause: err },
+    );
   }
 }
 
@@ -281,9 +284,13 @@ async function commitEditLocked(
     }
     const base = `commitEdit failed for ${relPath}: ${errorMessage(commitErr)}`;
     if (rollbackErr !== undefined) {
-      throw new Error(`${base}; rollback also failed: ${errorMessage(rollbackErr)}`);
+      // The commit failure is the primary cause; the rollback failure is
+      // carried in the message.
+      throw new Error(`${base}; rollback also failed: ${errorMessage(rollbackErr)}`, {
+        cause: commitErr,
+      });
     }
-    throw new Error(`${base} (previous bytes restored)`);
+    throw new Error(`${base} (previous bytes restored)`, { cause: commitErr });
   }
 
   const commitSha = (await runGit(project, ["rev-parse", "HEAD"])).trim();

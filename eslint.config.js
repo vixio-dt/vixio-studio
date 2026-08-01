@@ -19,4 +19,14 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // The content model's whole job is Traditional Chinese text where
+    // U+3000 IDEOGRAPHIC SPACE is meaningful data (script indentation,
+    // heading separators). The irregular-whitespace rule would force
+    // escaping the exact bytes the package exists to preserve.
+    files: ['packages/content-model/**/*.ts'],
+    rules: {
+      'no-irregular-whitespace': 'off',
+    },
+  },
 ])

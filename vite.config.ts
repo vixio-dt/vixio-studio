@@ -51,5 +51,13 @@ export default defineConfig({
   },
   server: {
     port: 5180,
+    // Writing-platform server (packages/server, default PORT=8787): the SPA
+    // talks to /api/* same-origin and the dev server forwards it.
+    proxy: {
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+      },
+    },
   },
 });

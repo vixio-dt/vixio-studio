@@ -4,6 +4,10 @@ import { WorkspaceShell } from "@/components/layout/WorkspaceShell";
 import { CastPage } from "@/features/cast/CastPage";
 import { ComicExportPage } from "@/features/comicexport/ComicExportPage";
 import { FrameLabPage } from "@/features/framelab/FrameLabPage";
+import { LibraryDocPage } from "@/features/library/LibraryDocPage";
+import { LibraryDocsPage } from "@/features/library/LibraryDocsPage";
+import { LibraryEditorPage } from "@/features/library/LibraryEditorPage";
+import { LibraryProjectsPage } from "@/features/library/LibraryProjectsPage";
 import { MotionPage } from "@/features/motion/MotionPage";
 import { PagesPage } from "@/features/pages/PagesPage";
 import { PanelLabPage } from "@/features/panellab/PanelLabPage";
@@ -18,6 +22,11 @@ const App = () => (
   <Routes>
     <Route path="/" element={<ProjectsPage />} />
     <Route path="/settings" element={<SettingsPage />} />
+    {/* Writing platform: wiki + byte-faithful editor over git-backed projects. */}
+    <Route path="/library" element={<LibraryProjectsPage />} />
+    <Route path="/library/:projectId" element={<LibraryDocsPage />} />
+    <Route path="/library/:projectId/doc" element={<LibraryDocPage />} />
+    <Route path="/library/:projectId/edit" element={<LibraryEditorPage />} />
     <Route path="/p/:projectId" element={<WorkspaceShell />}>
       <Route index element={<Navigate to="script" replace />} />
       <Route path="script" element={<ScriptPage />} />
