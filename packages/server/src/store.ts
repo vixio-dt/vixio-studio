@@ -87,6 +87,11 @@ async function resolveDocPath(
   if (relPath.includes("\\")) {
     throw new PathViolationError("document path must use forward slashes only");
   }
+  if (relPath.startsWith(":")) {
+    // A leading colon is git pathspec magic (":(glob)…"); no real document
+    // path starts with one, so reject it before it reaches any git argv.
+    throw new PathViolationError(`document path must not start with ':': ${relPath}`);
+  }
   if (path.isAbsolute(relPath)) {
     throw new PathViolationError(`document path must be relative: ${relPath}`);
   }

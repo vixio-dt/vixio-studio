@@ -112,6 +112,20 @@ const MARKER_RE = /(頁角小字|頁角題字|題字|畫|白|音|註)(（[^）]*
  */
 const WORDLIKE_BEFORE = /[\p{Script=Han}A-Za-z0-9]/u;
 
+/**
+ * The full code point ending at `index` (exclusive) — surrogate-pair aware,
+ * so supplementary-plane Han (Ext-B Cantonese like 𠝹) is judged as one
+ * character by the guard instead of a lone low surrogate slipping past it.
+ */
+const charBefore = (text: string, index: number): string | null => {
+  if (index <= 0) return null;
+  const unit = text.charCodeAt(index - 1);
+  if (unit >= 0xdc00 && unit <= 0xdfff && index >= 2) {
+    return text.slice(index - 2, index);
+  }
+  return text[index - 1]!;
+};
+
 type MarkerHit = {
   kind: FieldKind;
   paren: string | null;
@@ -127,7 +141,7 @@ const scanMarkers = (text: string, fromCol: number): MarkerHit[] => {
   for (let m = MARKER_RE.exec(text); m !== null; m = MARKER_RE.exec(text)) {
     const kind = m[1] as FieldKind;
     const parenGroup = m[2];
-    const before = m.index > 0 ? text[m.index - 1]! : null;
+    const before = charBefore(text, m.index);
     const wordlike = before !== null && WORDLIKE_BEFORE.test(before);
     const missingRequiredParen = kind === "白" && parenGroup === undefined;
     if (!wordlike && !missingRequiredParen) {

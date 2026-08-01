@@ -142,12 +142,29 @@ describe("parseManifest", () => {
 describe("validateField / appendRecord", () => {
   const doc = parse(FIXTURE);
 
-  it("validateField rejects comma, CR, and LF, and passes clean text", () => {
+  it("validateField rejects comma, quote, CR, and LF, and passes clean text", () => {
     expect(() => validateField("Shengtian retry - PASSED")).not.toThrow();
     expect(() => validateField("a,b")).toThrow(ManifestFieldError);
     expect(() => validateField("a,b")).toThrow(/comma/);
+    expect(() => validateField('a"b')).toThrow(/double quote/);
     expect(() => validateField("a\rb")).toThrow(/CR/);
     expect(() => validateField("a\nb")).toThrow(/LF/);
+  });
+
+  it("imageLinkToCsv path rejects a malformed link object at runtime", () => {
+    expect(() =>
+      appendRecord(doc, {
+        page: "STYLE-PROBE",
+        panel: "probe",
+        version: "v1",
+        seed: null,
+        status: "pending",
+        // Untyped callers can pass anything; it must fail loudly, not
+        // serialize as an empty field.
+        imageLink: "job:not-an-object" as never,
+        promptSummary: "runtime guard",
+      }),
+    ).toThrow(/Malformed image link/);
   });
 
   it("appendRecord returns the exact new line and a re-parseable doc", () => {

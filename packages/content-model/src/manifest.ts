@@ -245,9 +245,19 @@ export const serializeManifest = (doc: ManifestDoc): string =>
  * that would need quoting are *rejected*, never escaped.
  */
 export const validateField = (value: string): void => {
-  const bad = /[,\r\n]/.exec(value);
+  // Double quotes are rejected alongside separators (spec §3b(d)): the
+  // format has no quoting, and a leading `"` would corrupt the row under
+  // any standard CSV tool that later touches the file.
+  const bad = /[,"\r\n]/.exec(value);
   if (bad !== null) {
-    const name = bad[0] === "," ? "a comma" : bad[0] === "\r" ? "a CR" : "an LF";
+    const name =
+      bad[0] === ","
+        ? "a comma"
+        : bad[0] === '"'
+          ? "a double quote"
+          : bad[0] === "\r"
+            ? "a CR"
+            : "an LF";
     throw new ManifestFieldError(
       `Field value ${JSON.stringify(value)} contains ${name}; ` +
         `the manifest has no quoting — rejected.`,
@@ -279,6 +289,14 @@ const imageLinkToCsv = (link: ManifestImageLink): string => {
       return `job:${link.value}`;
     case "empty":
       return "";
+    default: {
+      // Runtime guard for untyped callers: a malformed link object must
+      // fail loudly, not serialize as an empty field.
+      const unreachable: never = link;
+      throw new ManifestFieldError(
+        `Malformed image link ${JSON.stringify(unreachable)}; expected {kind: "url"|"job"|"empty"}.`,
+      );
+    }
   }
 };
 

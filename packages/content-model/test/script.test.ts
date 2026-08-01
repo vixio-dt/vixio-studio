@@ -80,6 +80,34 @@ describe("parseScript", () => {
     expect(spread.fields[3]!.paren).toBe("後台");
   });
 
+  it("rejects a marker preceded by supplementary-plane Han (surrogate-aware guard)", () => {
+    // 𠮷 is U+20BB7 (Ext-B): '𠮷音：' must read as prose, not a 音 field.
+    const astral = [
+      "VIXIO CREATIVES｜《測試》TEST",
+      "文件：測試",
+      "版本 v1｜狀態：測試",
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━",
+      "序幕（第1至1頁）",
+      "",
+      "第1頁（1格）",
+      "格1　畫：開場。",
+      "　續行提及𠮷音：不是欄位。",
+      "",
+    ].join("\n");
+    const astralDoc = parseScript(readSource(Buffer.from(astral, "utf-8")));
+    const panel = astralDoc.pages[0]!.panels[0]!;
+    expect(panel.fields.map((f) => f.kind)).toEqual(["畫"]);
+    expect(panel.fields[0]!.raw).toContain("𠮷音：不是欄位。");
+    expect(astralDoc.report.warnings).toEqual([]);
+  });
+
+  it("serializes a file with no trailing newline byte-exactly", () => {
+    const unterminated = FIXTURE.slice(0, -1);
+    const src = readSource(Buffer.from(unterminated, "utf-8"));
+    expect(serializeLines(src.lines)).toBe(unterminated);
+  });
+
   it("treats prose lookalikes as continuations, not fields", () => {
     const p2 = doc.pages[0]!.panels[1]!;
     expect(p2.fields.map((f) => f.kind)).toEqual(["畫", "白"]);
