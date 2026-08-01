@@ -1,6 +1,15 @@
 # BUILD PLAN — writing-first platform, orchestrated execution
 
 Status: executing · 2026-08-01 · governs the subagent build of `docs/specs/vixio-studio-architecture.md`
+
+## Status ledger (live)
+
+- **Wave A** (canon/design/manifest parsers): ✅ landed, 111→114 content-model tests incl. canon oracles. **Gate verdict: PROCEED** — reviewer's astral-guard major fixed (surrogate-aware tokenizer boundary), manifest writer hardened (quote rejection, malformed-link runtime guard).
+- **Wave B** (server skeleton): ✅ landed. **Gate verdict: PROCEED** — reviewer's two majors (commitEdit TOCTOU race, no-op 500) fixed with per-project write lock + `unchanged` status, re-verified by reviewer against original failing probes. 50 server tests.
+- **Wave C1** (parsed-view endpoints, never-ship redaction): ✅ landed, 12 new tests, redaction asserted at response-text level. Reviewer gate: queued with C2/D1.
+- **Wave C2** (library UI + editor) / **Wave D1** (compiler): 🔄 building.
+- **Wave E live workflow**: ✅ **executed 2026-08-01** — style lock v3 extracted verbatim (sha-pinned) → five-block probe → seedream_v5_pro 2k 2:3 → completed 1664×2496, platform seed 577914 read back from job params → write-ahead manifest row (our codec) reconciled pending→completed, byte-exact round-trip. 3 credits. Scratch manifest only; no canon anchors involved.
+- **M0 VPS spike**: runbook + canUseTool verification script shipped (`docs/runbooks/vps-bootstrap.md`, `scripts/m0-canusetool.mjs`); execution awaits the VPS.
 Cadence: every wave = builders (parallel where files are disjoint) → **reviewer gate** (runs tests, hunts spec violations, verdict) → orchestrator fixes → commit → next wave. No wave proceeds over an unreviewed predecessor.
 
 ## Definition of Done
