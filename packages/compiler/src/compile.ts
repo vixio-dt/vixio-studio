@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { CORE_PINS, STYLE_LOCK_SHA256 } from "./pins.ts";
+
 /**
  * The five-block prompt compiler (hth-content-model spec §3, architecture
  * spec §3.3).
@@ -242,11 +244,33 @@ const assembleBlocks = (input: CompileInput): FiveBlocks => {
 };
 
 /**
+ * The pin table the compiler verifies against: the reviewed constants from
+ * pins.ts by default. Passing a custom table is an explicit, greppable act
+ * reserved for tests and for future projects with their own pins module —
+ * production call sites use the default, which is what makes the
+ * no-softening guard non-tautological (a caller cannot bless its own bytes
+ * by hashing them; the hash must also match a constant reviewed into this
+ * package).
+ */
+export type PinTable = {
+  styleLock: string;
+  core: Readonly<Record<string, string>>;
+};
+
+export const DEFAULT_PINS: PinTable = {
+  styleLock: STYLE_LOCK_SHA256,
+  core: CORE_PINS,
+};
+
+/**
  * Compile one panel prompt. Either every invariant holds and the result
  * carries the prompt plus its five blocks, or the result carries ALL
  * refusals (not just the first) and no prompt at all.
  */
-export const compilePanelPrompt = (input: CompileInput): CompileResult => {
+export const compilePanelPrompt = (
+  input: CompileInput,
+  pins: PinTable = DEFAULT_PINS,
+): CompileResult => {
   const refusals: Refusal[] = [];
 
   // superseded-source — a superseded flag anywhere poisons the whole input.
@@ -268,6 +292,16 @@ export const compilePanelPrompt = (input: CompileInput): CompileResult => {
       message:
         `style lock text hashes to ${actualStyle} but the pinned hash is ` +
         `${input.styleLock.sha256}; refusing to emit a drifted style block`,
+    });
+  }
+  // style-lock-unpinned — the caller's hash must also equal the reviewed
+  // constant, so a caller hashing its own text cannot bless it.
+  if (actualStyle !== pins.styleLock.toLowerCase()) {
+    refusals.push({
+      invariant: "style-lock-unpinned",
+      message:
+        `style lock text does not match the reviewed pin ${pins.styleLock}; ` +
+        `only the frozen style block compiles`,
     });
   }
 
@@ -295,6 +329,25 @@ export const compilePanelPrompt = (input: CompileInput): CompileResult => {
             `cast member "${label}" coreRaw hashes to ${actualCore} but the pinned hash is ` +
             `${member.corePinnedSha256}; CORE blocks are never reworded to clear a filter — ` +
             `canon outranks convenience`,
+        });
+      }
+      // pin-unknown / pin-mismatch — the member must exist in the reviewed
+      // pin table and its bytes must hash to that constant. A new character
+      // compiles only after its pin lands here as a reviewed canon edit.
+      const reviewedPin = pins.core[member.name];
+      if (reviewedPin === undefined) {
+        refusals.push({
+          invariant: "pin-unknown",
+          message:
+            `cast member "${label}" (name ${JSON.stringify(member.name)}) has no entry in the ` +
+            `reviewed pin table; add its CORE hash to pins.ts in the same commit as the canon edit`,
+        });
+      } else if (actualCore !== reviewedPin.toLowerCase()) {
+        refusals.push({
+          invariant: "pin-mismatch",
+          message:
+            `cast member "${label}" coreRaw hashes to ${actualCore} but the reviewed pin for ` +
+            `${JSON.stringify(member.name)} is ${reviewedPin}; the pin table and canon must move together`,
         });
       }
     }
@@ -354,18 +407,24 @@ export const compilePanelPrompt = (input: CompileInput): CompileResult => {
   const blocks = assembleBlocks(input);
   const prompt = blocks.join("\n\n");
 
-  // franchise-denylist (I4) — scanned over every block.
-  blocks.forEach((block, index) => {
-    const blockName = PROMPT_BLOCK_NAMES[index] ?? `block ${index}`;
-    for (const rule of FRANCHISE_DENYLIST) {
-      if (rule.pattern.test(block)) {
-        refusals.push({
-          invariant: "franchise-denylist",
-          message: `franchise term ${rule.label} found in ${blockName} block; franchise names never go into prompts`,
-        });
-      }
+  // franchise-denylist (I4) — scanned over the WHOLE outbound buffer, not
+  // per block: multi-word patterns use \s+, which matches the "\n\n" block
+  // join, so a term straddling a block boundary would otherwise compile
+  // clean while the joined prompt matches the denylist. Per-block hits are
+  // still attributed by name in the message when locatable.
+  for (const rule of FRANCHISE_DENYLIST) {
+    if (rule.pattern.test(prompt)) {
+      const inBlock = blocks.findIndex((block) => rule.pattern.test(block));
+      const where =
+        inBlock >= 0
+          ? `in ${PROMPT_BLOCK_NAMES[inBlock] ?? `block ${inBlock}`} block`
+          : "across a block boundary";
+      refusals.push({
+        invariant: "franchise-denylist",
+        message: `franchise term ${rule.label} found ${where}; franchise names never go into prompts`,
+      });
     }
-  });
+  }
 
   // required-substring — guardrail (a)'s post-assembly mechanical form.
   refusals.push(...checkRequiredSubstrings(input, prompt));

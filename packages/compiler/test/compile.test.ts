@@ -6,10 +6,12 @@ import {
   assertVerbatim,
   checkRequiredSubstrings,
   compilePanelPrompt,
+  DEFAULT_PINS,
   sha256Hex,
   type CastMemberInput,
   type CompileInput,
   type CompileResult,
+  type PinTable,
   type Refusal,
 } from "../src/compile.ts";
 
@@ -66,6 +68,22 @@ const baseInput = (): CompileInput => ({
   aspectRatio: "4:3",
 });
 
+/**
+ * The reviewed-pin table for the synthetic fixtures. Production callers use
+ * DEFAULT_PINS (the real repo's constants); tests inject this one — passing
+ * a table is the explicit seam, defaulting is the guarantee.
+ */
+const TEST_PINS: PinTable = {
+  styleLock: sha256Hex(STYLE_TEXT),
+  core: {
+    "FIXTURE BOY": sha256Hex(PINNED_CORE),
+    "FIXTURE ELDER": sha256Hex(SECOND_CORE),
+  },
+};
+
+const compile = (input: CompileInput, pins: PinTable = TEST_PINS): CompileResult =>
+  compilePanelPrompt(input, pins);
+
 const slugsOf = (result: CompileResult): string[] =>
   result.ok ? [] : result.refusals.map((refusal: Refusal) => refusal.invariant);
 
@@ -80,7 +98,7 @@ const expectRefused = (result: CompileResult): Refusal[] => {
 describe("compilePanelPrompt — happy path", () => {
   it("emits exactly five blocks in fixed order with byte-identical verbatim spans", () => {
     const input = baseInput();
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -111,7 +129,7 @@ describe("compilePanelPrompt — happy path", () => {
 
   it("assembles each block exactly as specified", () => {
     const input = baseInput();
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -130,7 +148,7 @@ describe("compilePanelPrompt — happy path", () => {
       member({ negativeRaw: sharedNegative }),
       secondMember({ negativeRaw: sharedNegative }),
     ];
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -143,7 +161,7 @@ describe("compilePanelPrompt — happy path", () => {
     const input = baseInput();
     input.set = null;
     input.colorRules = null;
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.blocks[1]).toBe(PINNED_CORE);
@@ -161,14 +179,14 @@ describe("style-lock-hash", () => {
       text: STYLE_TEXT + " (helpfully rewrapped)",
       sha256: sha256Hex(STYLE_TEXT),
     };
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toContain("style-lock-hash");
   });
 
   it("refuses when the pinned hash itself is wrong for the frozen text", () => {
     const input = baseInput();
     input.styleLock = { text: STYLE_TEXT, sha256: "deadbeef" };
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     expect(slugsOf(result)).toEqual(["style-lock-hash"]);
   });
 });
@@ -184,19 +202,29 @@ describe("core-drift — the softening guard (guardrail a)", () => {
     input.cast = [
       member({ coreRaw: softened, corePinnedSha256: sha256Hex(PINNED_CORE) }),
     ];
-    const result = compilePanelPrompt(input);
+    const result = compile(input);
     const refusals = expectRefused(result);
-    expect(refusals.map((r) => r.invariant)).toEqual(["core-drift"]);
+    // Both halves of the guard fire: drift against the caller's pin AND
+    // mismatch against the reviewed table.
+    expect(refusals.map((r) => r.invariant)).toEqual(["core-drift", "pin-mismatch"]);
     // NEVER auto-repaired: the result carries no prompt anywhere.
     expect(JSON.stringify(result).includes("slight young fixture performer")).toBe(false);
     expect(JSON.stringify(result).includes("age 14")).toBe(false);
   });
 
-  it("accepts a changed core only when its pin was updated deliberately", () => {
+  it("accepts a changed core only when caller pin AND reviewed table move together", () => {
     const editedCore = "Fixture boy, age 15, still small-for-his-age, wiry build.";
     const input = baseInput();
     input.cast = [member({ coreRaw: editedCore, corePinnedSha256: sha256Hex(editedCore) })];
-    expect(compilePanelPrompt(input).ok).toBe(true);
+    // Caller pin alone is NOT enough — the reviewed table still refuses.
+    expect(slugsOf(compile(input))).toEqual(["pin-mismatch"]);
+    // The deliberate canon edit updates the reviewed table in the same
+    // commit; only then does the new core compile.
+    const updatedPins: PinTable = {
+      styleLock: TEST_PINS.styleLock,
+      core: { ...TEST_PINS.core, "FIXTURE BOY": sha256Hex(editedCore) },
+    };
+    expect(compile(input, updatedPins).ok).toBe(true);
   });
 });
 
@@ -204,26 +232,26 @@ describe("per-member integrity", () => {
   it("refuses an empty coreRaw (core-empty)", () => {
     const input = baseInput();
     input.cast = [member({ coreRaw: "" })];
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toContain("core-empty");
   });
 
   it("refuses a whitespace-only coreRaw (core-empty)", () => {
     const input = baseInput();
     input.cast = [member({ coreRaw: "   \n  " })];
-    expect(slugsOf(compilePanelPrompt(input))).toContain("core-empty");
+    expect(slugsOf(compile(input))).toContain("core-empty");
   });
 
   it("refuses an empty negativeRaw (negative-missing)", () => {
     const input = baseInput();
     input.cast = [member({ negativeRaw: "" })];
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["negative-missing"]);
+    expect(slugsOf(compile(input))).toEqual(["negative-missing"]);
   });
 
   it("refuses a runtime-absent negativeRaw (negative-missing)", () => {
     const input = baseInput();
     input.cast = [member({ negativeRaw: undefined as unknown as string })];
-    expect(slugsOf(compilePanelPrompt(input))).toContain("negative-missing");
+    expect(slugsOf(compile(input))).toContain("negative-missing");
   });
 });
 
@@ -232,48 +260,68 @@ describe("staging gates (guardrail c)", () => {
     const input = baseInput();
     input.cast = [];
     input.set = null;
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toContain("stage-text-only");
   });
 
   it("accepts a set-only panel (a set is not text alone)", () => {
     const input = baseInput();
     input.cast = [];
-    expect(compilePanelPrompt(input).ok).toBe(true);
+    expect(compile(input).ok).toBe(true);
   });
 
   it("refuses an unanchored cast member (stage-anchor-missing)", () => {
     const input = baseInput();
     input.cast = [member({ anchorElementId: null })];
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["stage-anchor-missing"]);
+    expect(slugsOf(compile(input))).toEqual(["stage-anchor-missing"]);
   });
 
   it("still refuses under probe: true when the member does not opt in", () => {
     const input = baseInput();
     input.probe = true;
     input.cast = [member({ anchorElementId: null })];
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["stage-anchor-missing"]);
+    expect(slugsOf(compile(input))).toEqual(["stage-anchor-missing"]);
   });
 
   it("still refuses allowUnanchored without a probe compile", () => {
     const input = baseInput();
     input.cast = [member({ anchorElementId: null, allowUnanchored: true })];
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["stage-anchor-missing"]);
+    expect(slugsOf(compile(input))).toEqual(["stage-anchor-missing"]);
   });
 
   it("allows an unanchored member only for probe + allowUnanchored", () => {
     const input = baseInput();
     input.probe = true;
     input.cast = [member({ anchorElementId: null, allowUnanchored: true })];
-    expect(compilePanelPrompt(input).ok).toBe(true);
+    expect(compile(input).ok).toBe(true);
   });
 });
 
 describe("franchise-denylist (I4)", () => {
+  it("refuses a multi-word term straddling a block boundary (whole-buffer scan)", () => {
+    // "jujutsu" ends CONTINUITY (via colorRules) and "kaisen" begins
+    // DIRECTION; the \n\n block join satisfies the pattern's \s+, so a
+    // per-block scan would compile this clean. The scan must run over the
+    // joined outbound buffer (reviewer gate blocker, spec I4).
+    const input = baseInput();
+    input.colorRules = "Muted palette homage to jujutsu";
+    input.direction = ["kaisen-grade impact frames", "low angle"];
+    const refusals = expectRefused(compile(input));
+    expect(refusals.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
+    expect(refusals[0]!.message).toContain("across a block boundary");
+
+    // The same straddle across SHOT → NEGATIVE.
+    const input2 = baseInput();
+    input2.shot = "He faces the demon";
+    input2.cast = [member({ negativeRaw: "slayer tropes, no watermark" })];
+    const refusals2 = expectRefused(compile(input2));
+    expect(refusals2.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
+  });
+
   it("refuses a Latin franchise name in the SHOT block, case-insensitively", () => {
     const input = baseInput();
     input.shot = "The boy strikes a pose straight out of jujutsu kaisen.";
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
     expect(refusals[0]!.message).toContain("SHOT");
   });
@@ -281,7 +329,7 @@ describe("franchise-denylist (I4)", () => {
   it("refuses JJK in the DIRECTION block", () => {
     const input = baseInput();
     input.direction = ["match the JJK lineart energy"];
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
     expect(refusals[0]!.message).toContain("DIRECTION");
   });
@@ -289,7 +337,7 @@ describe("franchise-denylist (I4)", () => {
   it("refuses Bleach in the NEGATIVE block", () => {
     const input = baseInput();
     input.cast = [member({ negativeRaw: "no Bleach-style shinigami robes" })];
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["franchise-denylist"]);
     expect(refusals[0]!.message).toContain("NEGATIVE");
   });
@@ -297,20 +345,25 @@ describe("franchise-denylist (I4)", () => {
   it("refuses CJK franchise names in the CONTINUITY block", () => {
     const input = baseInput();
     input.set = { name: "FIXTURE STAGE", raw: "戲台佈景，牆上貼住咒術回戰海報。" };
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["franchise-denylist"]);
+    expect(slugsOf(compile(input))).toEqual(["franchise-denylist"]);
 
     const tainted = "Fixture boy, 鬼滅 fan, age 14.";
     const input2 = baseInput();
-    // Pin matches the tainted core, so only the denylist fires.
+    // Caller pin AND reviewed table both bless the tainted bytes, so the
+    // denylist is isolated as the only refusal.
     input2.cast = [member({ coreRaw: tainted, corePinnedSha256: sha256Hex(tainted) })];
-    expect(slugsOf(compilePanelPrompt(input2))).toEqual(["franchise-denylist"]);
+    const taintedPins: PinTable = {
+      styleLock: TEST_PINS.styleLock,
+      core: { ...TEST_PINS.core, "FIXTURE BOY": sha256Hex(tainted) },
+    };
+    expect(slugsOf(compile(input2, taintedPins))).toEqual(["franchise-denylist"]);
   });
 
   it("refuses Demon Slayer and 呪術廻戦 wherever they appear", () => {
     const input = baseInput();
     input.shot = "A demon slayer stance under the lanterns.";
     input.direction = ["呪術廻戦風の構図"];
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     const slugs = refusals.map((r) => r.invariant);
     expect(slugs.filter((s) => s === "franchise-denylist")).toHaveLength(2);
   });
@@ -318,11 +371,11 @@ describe("franchise-denylist (I4)", () => {
   it("denies 死神 only as a title adjacent to Bleach", () => {
     const alone = baseInput();
     alone.shot = "戲台深處，佢望見死神一樣嘅黑影。";
-    expect(compilePanelPrompt(alone).ok).toBe(true);
+    expect(compile(alone).ok).toBe(true);
 
     const titled = baseInput();
     titled.shot = "牆上係死神 Bleach 嘅海報。";
-    const refusals = expectRefused(compilePanelPrompt(titled));
+    const refusals = expectRefused(compile(titled));
     // Both the adjacency rule and the bare Bleach rule fire — all collected.
     expect(refusals.every((r) => r.invariant === "franchise-denylist")).toBe(true);
     expect(refusals.length).toBeGreaterThanOrEqual(2);
@@ -331,7 +384,7 @@ describe("franchise-denylist (I4)", () => {
   it("does not false-positive on the ordinary word 'bleached'", () => {
     const input = baseInput();
     input.shot = "Sun-bleached timber boards, a bleached banner overhead.";
-    expect(compilePanelPrompt(input).ok).toBe(true);
+    expect(compile(input).ok).toBe(true);
   });
 });
 
@@ -344,7 +397,7 @@ describe("superseded-source", () => {
       meta: { superseded: true },
     };
     input.cast = [castMember];
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["superseded-source"]);
     expect(refusals[0]!.message).toContain("cast[0].legacy.meta");
   });
@@ -352,7 +405,7 @@ describe("superseded-source", () => {
   it("refuses superseded: true at the top level", () => {
     const input = baseInput() as CompileInput & Record<string, unknown>;
     input["superseded"] = true;
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["superseded-source"]);
+    expect(slugsOf(compile(input))).toEqual(["superseded-source"]);
   });
 
   it("ignores superseded: false and unknown extra fields", () => {
@@ -360,7 +413,7 @@ describe("superseded-source", () => {
     const set = input.set as NonNullable<CompileInput["set"]> & Record<string, unknown>;
     set["superseded"] = false;
     set["extraField"] = { anything: "goes" };
-    expect(compilePanelPrompt(input).ok).toBe(true);
+    expect(compile(input).ok).toBe(true);
   });
 });
 
@@ -369,19 +422,19 @@ describe("aspect-unknown", () => {
     for (const ratio of ALLOWED_ASPECT_RATIOS) {
       const input = baseInput();
       input.aspectRatio = ratio;
-      expect(compilePanelPrompt(input).ok).toBe(true);
+      expect(compile(input).ok).toBe(true);
     }
   });
 
   it("refuses a ratio outside the allowed set", () => {
     const input = baseInput();
     input.aspectRatio = "9:16";
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     expect(refusals.map((r) => r.invariant)).toEqual(["aspect-unknown"]);
 
     const empty = baseInput();
     empty.aspectRatio = "";
-    expect(slugsOf(compilePanelPrompt(empty))).toEqual(["aspect-unknown"]);
+    expect(slugsOf(compile(empty))).toEqual(["aspect-unknown"]);
   });
 });
 
@@ -389,11 +442,11 @@ describe("shot-empty", () => {
   it("refuses an empty or whitespace-only shot", () => {
     const input = baseInput();
     input.shot = "";
-    expect(slugsOf(compilePanelPrompt(input))).toEqual(["shot-empty"]);
+    expect(slugsOf(compile(input))).toEqual(["shot-empty"]);
 
     const blank = baseInput();
     blank.shot = "   \n ";
-    expect(slugsOf(compilePanelPrompt(blank))).toEqual(["shot-empty"]);
+    expect(slugsOf(compile(blank))).toEqual(["shot-empty"]);
   });
 });
 
@@ -410,7 +463,7 @@ describe("multi-refusal collection", () => {
     ];
     input.shot = "";
     input.aspectRatio = "5:4";
-    const refusals = expectRefused(compilePanelPrompt(input));
+    const refusals = expectRefused(compile(input));
     const slugs = refusals.map((r) => r.invariant);
     expect(slugs).toContain("style-lock-hash");
     expect(slugs).toContain("core-drift");
@@ -448,7 +501,7 @@ describe("assertVerbatim", () => {
 describe("required-substring (post-assembly gate)", () => {
   it("refuses when a downstream mutation broke a verbatim span", () => {
     const input = baseInput();
-    const compiled = compilePanelPrompt(input);
+    const compiled = compile(input);
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
 
@@ -461,7 +514,7 @@ describe("required-substring (post-assembly gate)", () => {
 
   it("is clean on the compiler's own assembly", () => {
     const input = baseInput();
-    const compiled = compilePanelPrompt(input);
+    const compiled = compile(input);
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
     expect(checkRequiredSubstrings(input, compiled.prompt)).toEqual([]);

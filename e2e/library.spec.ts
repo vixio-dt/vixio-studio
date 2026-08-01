@@ -110,11 +110,14 @@ const installApi = async (page: Page, state: ApiState): Promise<void> => {
     const url = new URL(request.url());
     const { pathname, searchParams } = url;
 
+    // Enveloped shapes, matching the real server (app.ts wraps lists as
+    // {projects: […]} / {docs: […]}); the client's unwrapList handles both,
+    // but the mock must exercise the shape the server actually sends.
     if (pathname === "/api/projects") {
-      return route.fulfill({ json: [PROJECT] });
+      return route.fulfill({ json: { projects: [PROJECT] } });
     }
     if (pathname === `/api/projects/${PROJECT.id}/docs`) {
-      return route.fulfill({ json: DOCS });
+      return route.fulfill({ json: { docs: DOCS } });
     }
     if (pathname === `/api/projects/${PROJECT.id}/view`) {
       const path = searchParams.get("path");

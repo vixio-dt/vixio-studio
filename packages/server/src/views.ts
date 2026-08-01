@@ -271,6 +271,15 @@ export function buildDocView(relPath: string, bytes: Buffer): DocView {
  * node with { redacted: true }. Canon sections are the only parser node that
  * carries the flag; other view kinds pass through untouched. The replacement
  * is structural — after this, the private bytes exist nowhere in the view.
+ *
+ * INTENTIONAL: the section's headingRaw/title remain visible in the default
+ * view — the UI renders a sealed placeholder that names what is sealed
+ * (e.g. 第十章's heading), which requires the heading. Only the body is
+ * private. Two documented boundaries live OUTSIDE this gate, both
+ * author-only surfaces today: GET /doc serves raw bytes (the editor's own
+ * path), and 422 details mirror parser messages. Neither may ever feed a
+ * model context or search index without passing through redaction first
+ * (architecture §3.4).
  */
 export function redactNeverShip(view: DocView): DocView {
   if (view.kind !== "canon") return view;
