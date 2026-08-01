@@ -3,8 +3,9 @@
  *
  * Raw byte transport: document content crosses the wire as base64 so the exact
  * bytes survive JSON (U+3000, fullwidth punctuation, any encoding — untouched).
- * Parsed-entity views (content-model) will be mounted as additional routes
- * later; this module deliberately does not import from @vixio/content-model.
+ * Parsed-entity views (content-model) are mounted at /view via ./views.ts,
+ * which owns the path dispatch, the projection shapes, and never-ship
+ * redaction; this module never touches @vixio/content-model directly.
  */
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -17,6 +18,7 @@ import {
   PathViolationError,
   readDoc,
 } from "./store.ts";
+import { buildDocView, redactNeverShip, type DocView } from "./views.ts";
 
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 // Strict base64: full quartets with canonical padding. Buffer.from(_, "base64")
@@ -24,7 +26,7 @@ const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 // path byte-exact end to end.
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
-function jsonError(c: Context, status: 400 | 404 | 409 | 500, message: string): Response {
+function jsonError(c: Context, status: 400 | 404 | 409 | 422 | 500, message: string): Response {
   return c.json({ error: message }, status);
 }
 
@@ -74,6 +76,29 @@ export async function createApp(configPath?: string): Promise<Hono> {
       size: doc.size,
       contentBase64: doc.bytes.toString("base64"),
     });
+  });
+
+  app.get("/api/projects/:id/view", async (c) => {
+    const project = byId.get(c.req.param("id"));
+    if (!project) return jsonError(c, 404, "unknown project");
+    const relPath = c.req.query("path");
+    if (relPath === undefined || relPath === "") {
+      return jsonError(c, 400, "missing required query parameter: path");
+    }
+    const doc = await readDoc(project, relPath);
+    let view: DocView;
+    try {
+      view = buildDocView(relPath, doc.bytes);
+    } catch (err) {
+      // The document exists but does not parse — the file's fault, not ours.
+      return jsonError(c, 422, err instanceof Error ? err.message : String(err));
+    }
+    // NEVER-SHIP gate: private bodies are stripped server-side and
+    // structurally unless the author drawer is explicitly requested.
+    if (c.req.query("drawer") !== "author") {
+      view = redactNeverShip(view);
+    }
+    return c.json(view);
   });
 
   app.get("/api/projects/:id/log", async (c) => {

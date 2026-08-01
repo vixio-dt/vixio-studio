@@ -11,11 +11,14 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc -b",
-    "test:unit": "npm run test --workspaces",
+    "typecheck": "tsc -b && npm run typecheck --workspaces --if-present",
+    "test:unit": "npm run test --workspaces --if-present",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.7",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@fontsource-variable/manrope": "^5.2.8",
