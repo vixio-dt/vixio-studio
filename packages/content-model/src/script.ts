@@ -127,7 +127,7 @@ const scanMarkers = (text: string, fromCol: number): MarkerHit[] => {
   for (let m = MARKER_RE.exec(text); m !== null; m = MARKER_RE.exec(text)) {
     const kind = m[1] as FieldKind;
     const parenGroup = m[2];
-    const before = m.index > 0 ? text[m.index - 1] : null;
+    const before = m.index > 0 ? text[m.index - 1]! : null;
     const wordlike = before !== null && WORDLIKE_BEFORE.test(before);
     const missingRequiredParen = kind === "白" && parenGroup === undefined;
     if (!wordlike && !missingRequiredParen) {
@@ -198,7 +198,7 @@ export const parseScript = (source: SourceText): ScriptDoc => {
     hits: MarkerHit[],
     /** Where content begins on this line (past a 格 header, if any). */
     prefixStart: number,
-  ): void => {
+  ): PanelField => {
     // Text between the content start and the first marker continues the
     // open field.
     const first = hits[0]!;
@@ -216,15 +216,15 @@ export const parseScript = (source: SourceText): ScriptDoc => {
     const panel = requirePanel(lineIndex);
     hits.forEach((hit, i) => {
       const valueTo = i + 1 < hits.length ? hits[i + 1]!.start : text.length;
-      const field: PanelField = {
+      panel.fields.push({
         kind: hit.kind,
         paren: hit.paren,
         parts: [{ line: lineIndex, from: hit.valueFrom, to: valueTo }],
         raw: "",
-      };
-      panel.fields.push(field);
-      openField = field;
+      });
     });
+    // hits is never empty at the call sites, so a field was just pushed.
+    return panel.fields[panel.fields.length - 1]!;
   };
 
   for (let i = cursor; i < lines.length; i += 1) {
@@ -308,7 +308,7 @@ export const parseScript = (source: SourceText): ScriptDoc => {
         const restStart = text.length - rest.length;
         const hits = scanMarkers(text, restStart);
         if (hits.length > 0) {
-          addFieldsFromLine(i, text, hits, restStart);
+          openField = addFieldsFromLine(i, text, hits, restStart);
         } else {
           warnings.push(`L${i + 1}: trailing text on 格 header with no field marker.`);
         }
@@ -327,7 +327,7 @@ export const parseScript = (source: SourceText): ScriptDoc => {
     const hits = scanMarkers(text, 0);
     claims.push({ from: i, to: i, owner: `content:${currentPage.blockIndex}` });
     if (hits.length > 0) {
-      addFieldsFromLine(i, text, hits, 0);
+      openField = addFieldsFromLine(i, text, hits, 0);
       continue;
     }
     // No markers: continuation of the open field.
